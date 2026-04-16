@@ -248,6 +248,105 @@ export default function App() {
   return <Dashboard session={session}/>;
 }
 
+function QuickAddModal({quickType,setQuickType,cats,MEDIOS_PAGO,todayISO,tc,C,inp,sel,quickSaving,quickError,quickOk,saveQuick,setQuickError,onClose}){
+  const [gasto,setGasto]=useState({cat:cats[0]?.id||"",sub:cats[0]?.items[0]?.id||"",monto:"",desc:"",medio_pago:"efectivo",fecha:todayISO()});
+  const [ingreso,setIngreso]=useState({tipo:"Sueldo ARS",monto:"",fecha:todayISO()});
+  const catG=cats.find(c=>c.id===gasto.cat)||cats[0];
+  const accentColor=quickType==="gasto"?C.red:C.green;
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:20}}>
+      <div style={{background:C.bg2,border:`1px solid ${C.bd2}`,borderRadius:16,padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",boxShadow:`0 20px 60px rgba(0,0,0,0.5)`}}>
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <span style={{fontWeight:600,fontSize:15,color:C.t}}>Carga rápida</span>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.t2,cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
+        </div>
+        {/* Toggle Gasto / Ingreso */}
+        <div style={{display:"flex",background:C.bg3,borderRadius:10,padding:3,marginBottom:22,gap:3}}>
+          {["gasto","ingreso"].map(t=>(
+            <button key={t} onClick={()=>{setQuickType(t);setQuickError("");}}
+              style={{flex:1,padding:"9px 0",fontSize:13,fontWeight:500,border:"none",cursor:"pointer",borderRadius:8,
+                background:quickType===t?(t==="gasto"?C.red:C.green):"transparent",
+                color:quickType===t?"#fff":C.t2,transition:"all .18s"}}>
+              {t==="gasto"?"📤  Gasto":"📥  Ingreso"}
+            </button>
+          ))}
+        </div>
+        {/* Monto destacado */}
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:10,color:C.t3,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.1em"}}>Monto</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:2}}>
+            <span style={{fontSize:30,color:C.t3,fontWeight:300,lineHeight:1}}>$</span>
+            <input
+              autoFocus type="number" placeholder="0"
+              style={{fontSize:36,fontWeight:700,textAlign:"center",border:"none",background:"transparent",outline:"none",color:accentColor,width:220,padding:0}}
+              value={quickType==="gasto"?gasto.monto:ingreso.monto}
+              onChange={e=>quickType==="gasto"?setGasto(x=>({...x,monto:e.target.value})):setIngreso(x=>({...x,monto:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&saveQuick(quickType==="gasto"?gasto:ingreso)}
+            />
+          </div>
+          <div style={{height:2,borderRadius:2,background:`linear-gradient(90deg,transparent,${accentColor},transparent)`,marginTop:8,opacity:0.6}}/>
+        </div>
+        {/* Campos gasto */}
+        {quickType==="gasto"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:4}}>Categoría</div>
+            <select style={sel} value={gasto.cat} onChange={e=>{const c=cats.find(x=>x.id===e.target.value);setGasto(x=>({...x,cat:e.target.value,sub:c?.items[0]?.id||""}));}}>
+              {cats.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:4}}>Subcategoría</div>
+            <select style={sel} value={gasto.sub} onChange={e=>setGasto(x=>({...x,sub:e.target.value}))}>
+              {catG?.items.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:4}}>Medio de pago</div>
+            <select style={sel} value={gasto.medio_pago} onChange={e=>setGasto(x=>({...x,medio_pago:e.target.value}))}>
+              {MEDIOS_PAGO.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:4}}>Fecha</div>
+            <input style={inp} type="date" value={gasto.fecha} onChange={e=>setGasto(x=>({...x,fecha:e.target.value}))}/>
+          </div>
+          <div style={{gridColumn:"1/-1"}}>
+            <div style={{fontSize:11,color:C.t2,marginBottom:4}}>Descripción (opcional)</div>
+            <input style={inp} placeholder="Ej: Almuerzo, nafta..." value={gasto.desc}
+              onChange={e=>setGasto(x=>({...x,desc:e.target.value}))}
+              onKeyDown={e=>e.key==="Enter"&&saveQuick(gasto)}/>
+          </div>
+        </div>}
+        {/* Campos ingreso */}
+        {quickType==="ingreso"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:4}}>Tipo</div>
+            <select style={sel} value={ingreso.tipo} onChange={e=>setIngreso(x=>({...x,tipo:e.target.value}))}>
+              {["Sueldo ARS","Sueldo USD","Freelance","Ahorros Pesos","Ahorros USD","Broker","Vacaciones","Otros"].map(t=><option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:4}}>Fecha</div>
+            <input style={inp} type="date" value={ingreso.fecha} onChange={e=>setIngreso(x=>({...x,fecha:e.target.value}))}/>
+          </div>
+        </div>}
+        {/* Error / Ok */}
+        {quickError&&<div style={{background:C.red+"18",border:`1px solid ${C.red}33`,borderRadius:8,padding:"8px 12px",fontSize:12,color:C.red,marginBottom:12}}>{quickError}</div>}
+        {quickOk&&<div style={{background:C.green+"18",border:`1px solid ${C.green}33`,borderRadius:8,padding:"10px 12px",fontSize:13,color:C.green,textAlign:"center",marginBottom:12}}>✓ {quickType==="gasto"?"Gasto":"Ingreso"} guardado</div>}
+        {/* Botón guardar */}
+        <button
+          onClick={()=>saveQuick(quickType==="gasto"?gasto:ingreso)}
+          disabled={quickSaving}
+          style={{width:"100%",background:`linear-gradient(135deg,${accentColor},${accentColor}BB)`,color:"#fff",border:"none",borderRadius:10,padding:"14px 0",fontSize:14,fontWeight:600,cursor:quickSaving?"not-allowed":"pointer",opacity:quickSaving?0.7:1,letterSpacing:"0.01em"}}>
+          {quickSaving?"Guardando...":`Guardar ${quickType}`}
+        </button>
+        <div style={{textAlign:"center",marginTop:10,fontSize:11,color:C.t3}}>TC al guardar: <b style={{color:C.t2}}>${tc.toLocaleString("es-AR")}</b> · Enter para guardar</div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ session }) {
   const userId=session.user.id;
   const [tab,setTab]=useState("dashboard");
@@ -502,7 +601,35 @@ function Dashboard({ session }) {
     setEditGastoLoading(false);
   };
 
-  // ─── FETCH IPC INDEC (argentinadatos.com) ──────────────────────────────────
+  // ─── CARGA RÁPIDA ─────────────────────────────────────────────────────────
+  const saveQuick=async(data)=>{
+    setQuickSaving(true); setQuickError(""); setQuickOk(false);
+    if(quickType==="gasto"){
+      if(!data.monto||isNaN(data.monto)){setQuickError("El monto es obligatorio.");setQuickSaving(false);return;}
+      const cat=cats.find(c=>c.id===data.cat);
+      const sub=cat?.items.find(s=>s.id===data.sub);
+      const d=new Date(data.fecha+"T12:00:00");
+      const row={user_id:userId,year:d.getFullYear(),month:d.getMonth(),cat:data.cat,sub:data.sub,
+        monto:parseFloat(data.monto),descripcion:data.desc||null,medio_pago:data.medio_pago||"efectivo",
+        fecha:d.toLocaleDateString("es-AR"),tc_at_time:tc,
+        cat_label:cat?.label,sub_label:sub?.label,sub_icon:sub?.icon,cat_color:cat?.color,cat_icon:cat?.icon};
+      const {data:saved,error}=await supabase.from("gastos").insert(row).select().single();
+      if(error){setQuickError("Error: "+error.message);setQuickSaving(false);return;}
+      if(saved) setGastos(gs=>[...gs,saved]);
+      saveTcHistory(tc);
+    } else {
+      if(!data.monto||isNaN(data.monto)){setQuickError("El monto es obligatorio.");setQuickSaving(false);return;}
+      const d=new Date(data.fecha+"T12:00:00");
+      const row={user_id:userId,year:d.getFullYear(),month:d.getMonth(),tipo:data.tipo,monto:parseFloat(data.monto),tc_at_time:tc};
+      const {data:saved,error}=await supabase.from("ingresos").insert(row).select().single();
+      if(error){setQuickError("Error: "+error.message);setQuickSaving(false);return;}
+      if(saved) setIngresos(is=>[...is,saved]);
+      saveTcHistory(tc);
+    }
+    setQuickOk(true);
+    setQuickSaving(false);
+    setTimeout(()=>{setQuickModal(false);setQuickOk(false);},900);
+  };
   const fetchInflacion=async()=>{
     if(inflData) return;
     setInflLoading(true); setInflError("");
@@ -513,6 +640,25 @@ function Dashboard({ session }) {
       else setInflError("Sin datos de inflación disponibles.");
     }catch(e){ setInflError("Error al obtener IPC: "+e.message); }
     setInflLoading(false);
+  };
+
+  // ─── FETCH TC HISTÓRICO (argentinadatos.com) ──────────────────────────────
+  const fetchTCHistorico=async()=>{
+    if(tcHistData) return;
+    setTcHistLoading(true); setTcHistError("");
+    try{
+      const [rOf,rBl]=await Promise.all([
+        fetch("https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial"),
+        fetch("https://api.argentinadatos.com/v1/cotizaciones/dolares/blue"),
+      ]);
+      const [jOf,jBl]=await Promise.all([rOf.json(),rBl.json()]);
+      if(Array.isArray(jOf)&&Array.isArray(jBl)){
+        setTcHistData({oficial:jOf,blue:jBl});
+      } else {
+        setTcHistError("No se pudieron obtener cotizaciones históricas.");
+      }
+    }catch(e){ setTcHistError("Error: "+e.message); }
+    setTcHistLoading(false);
   };
 
   const addIngreso=async()=>{
@@ -633,6 +779,18 @@ function Dashboard({ session }) {
   const [inflData,setInflData]=useState(null); // datos IPC de la API
   const [inflLoading,setInflLoading]=useState(false);
   const [inflError,setInflError]=useState("");
+
+  // ─── TC HISTÓRICO ──────────────────────────────────────────────────────────
+  const [tcHistData,setTcHistData]=useState(null); // {oficial:[],blue:[]}
+  const [tcHistLoading,setTcHistLoading]=useState(false);
+  const [tcHistError,setTcHistError]=useState("");
+
+  // ─── CARGA RÁPIDA DASHBOARD ────────────────────────────────────────────────
+  const [quickModal,setQuickModal]=useState(false);   // abre el modal
+  const [quickType,setQuickType]=useState("gasto");   // "gasto" | "ingreso"
+  const [quickSaving,setQuickSaving]=useState(false);
+  const [quickError,setQuickError]=useState("");
+  const [quickOk,setQuickOk]=useState(false);
 
   const OR_KEY="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";
 
@@ -1008,9 +1166,9 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           </div>
         </div>
         <div style={{display:"flex",overflowX:"auto"}}>
-          {["dashboard","gastos","ingresos","reporte","categorías","presupuesto","gráficos","inflación","ayuda"].map(t=>(
-            <button key={t} onClick={()=>{setTab(t);if(t==="inflación")fetchInflacion();}} style={{padding:"10px 14px",fontSize:13,border:"none",cursor:"pointer",background:"transparent",color:tab===t?C.t:C.t2,fontWeight:tab===t?500:400,borderBottom:tab===t?`2px solid ${t==="ayuda"?C.purple:t==="gráficos"?C.amber:t==="inflación"?C.green:C.blue}`:"2px solid transparent",whiteSpace:"nowrap",textTransform:"capitalize"}}>
-              {t==="ayuda"?"❓ Ayuda":t==="gráficos"?"📊 Gráficos":t==="inflación"?"📈 Inflación":t}{t==="presupuesto"&&budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length>0&&<span style={{marginLeft:5,background:C.red,color:"#fff",borderRadius:9,fontSize:10,padding:"1px 5px"}}>{budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length}</span>}
+          {["dashboard","gastos","ingresos","reporte","categorías","presupuesto","gráficos","inflación","dólar","ayuda"].map(t=>(
+            <button key={t} onClick={()=>{setTab(t);if(t==="inflación")fetchInflacion();if(t==="dólar"){fetchInflacion();fetchTCHistorico();}}} style={{padding:"10px 14px",fontSize:13,border:"none",cursor:"pointer",background:"transparent",color:tab===t?C.t:C.t2,fontWeight:tab===t?500:400,borderBottom:tab===t?`2px solid ${t==="ayuda"?C.purple:t==="gráficos"?C.amber:t==="inflación"?C.green:t==="dólar"?C.blue:C.blue}`:"2px solid transparent",whiteSpace:"nowrap",textTransform:"capitalize"}}>
+              {t==="ayuda"?"❓ Ayuda":t==="gráficos"?"📊 Gráficos":t==="inflación"?"📈 Inflación":t==="dólar"?"💵 Dólar":t}{t==="presupuesto"&&budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length>0&&<span style={{marginLeft:5,background:C.red,color:"#fff",borderRadius:9,fontSize:10,padding:"1px 5px"}}>{budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length}</span>}
             </button>
           ))}
         </div>
@@ -1079,6 +1237,17 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
       </div>}
 
       <div style={{padding:20}}>
+
+        {/* FAB — botón flotante carga rápida */}
+        <div style={{position:"fixed",bottom:28,right:24,zIndex:90,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:10}}>
+          <button
+            onClick={()=>{setQuickModal(true);setQuickError("");setQuickOk(false);}}
+            title="Cargar gasto o ingreso"
+            style={{width:52,height:52,borderRadius:"50%",background:`linear-gradient(135deg,${C.blue},${C.purple})`,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 4px 20px ${C.blue}55`,color:"#fff",fontSize:22,fontWeight:300,transition:"transform .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.transform="scale(1.1)"}
+            onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}
+          >+</button>
+        </div>
 
         {/* ALERTS */}
         {viewMode==="month"&&(budAlerts.length>0||hormiga.length>0)&&(()=>{
@@ -1837,16 +2006,24 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               </div>
 
               {/* ── Gráfico 1: gastos nominales vs reales ── */}
-              <Card title={`Gastos nominales vs en pesos de ${MONTHS[selMonth]} ${selYear}`} subtitle="Los puntos verdes muestran cuánto representarían esos gastos hoy, ajustados por inflación acumulada" badge={inflData?{label:"IPC INDEC",bg:C.green+"22",color:C.green}:null}>
+              <Card title={`Gastos nominales vs en pesos de ${MONTHS[selMonth]} ${selYear}`} subtitle="Los puntos sólidos son meses con datos. La línea verde muestra el equivalente en pesos de hoy ajustado por IPC acumulado." badge={inflData?{label:"IPC INDEC",bg:C.green+"22",color:C.green}:null}>
                 {!inflData?<div style={{fontSize:12,color:C.t3,padding:"20px 0",textAlign:"center"}}>Cargando datos de inflación...</div>:(()=>{
-                  const pts=meses.map((m2,i)=>({
-                    x:PL+(i/11)*cW,
-                    yNom:m2.gastoNominal>0?PT+cH*(1-m2.gastoNominal/maxReal):null,
-                    yReal:m2.gastoReal>0?PT+cH*(1-m2.gastoReal/maxReal):null,
+                  // Solo meses CON datos para trazar las líneas — sin huecos
+                  const mesConDatos=meses.filter(m2=>m2.gastoNominal>0);
+                  if(mesConDatos.length===0) return<div style={{fontSize:12,color:C.t3,padding:"20px 0",textAlign:"center"}}>Sin gastos registrados en {selYear}.</div>;
+                  const maxV=Math.max(...mesConDatos.map(m2=>Math.max(m2.gastoNominal,m2.gastoReal)),1);
+                  const toY=(v)=>PT+cH*(1-(v/maxV));
+                  const pts=mesConDatos.map(m2=>({
+                    x:PL+((m2.m)/11)*cW,
+                    yNom:toY(m2.gastoNominal),
+                    yReal:toY(m2.gastoReal),
                     ...m2
                   }));
-                  const pathNom=pts.filter(p=>p.yNom!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.yNom}`).join(" ");
-                  const pathReal=pts.filter(p=>p.yReal!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.yReal}`).join(" ");
+                  const pathNom=pts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.yNom}`).join(" ");
+                  const pathReal=pts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.yReal}`).join(" ");
+                  const floorY=PT+cH;
+                  const areaNom=`M${pts[0].x},${floorY} ${pts.map(p=>`L${p.x},${p.yNom}`).join(" ")} L${pts[pts.length-1].x},${floorY} Z`;
+                  const areaReal=`M${pts[0].x},${floorY} ${pts.map(p=>`L${p.x},${p.yReal}`).join(" ")} L${pts[pts.length-1].x},${floorY} Z`;
                   return<>
                     <svg viewBox={`0 0 ${W} ${H}`} style={svgStyle} xmlns="http://www.w3.org/2000/svg">
                       <defs>
@@ -1854,40 +2031,45 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                         <linearGradient id="gnN" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.red} stopOpacity="0.15"/><stop offset="100%" stopColor={C.red} stopOpacity="0"/></linearGradient>
                       </defs>
                       {[0,0.25,0.5,0.75,1].map((f,i)=>{
-                        const v=Math.round(maxReal*f);
+                        const v=Math.round(maxV*f);
                         const y=PT+cH*(1-f);
                         return<g key={i}>
                           <line x1={PL} y1={y} x2={W-PR} y2={y} stroke={C.bd} strokeWidth="0.5"/>
                           <text x={PL-5} y={y+4} textAnchor="end" fill={C.t3} fontSize="9" fontFamily="sans-serif">{v>=1000?Math.round(v/1000)+"K":v}</text>
                         </g>;
                       })}
-                      {pathNom&&<><path d={`M${pts.filter(p=>p.yNom)[0]?.x},${PT+cH} ${pts.filter(p=>p.yNom).map(p=>`L${p.x},${p.yNom}`).join(" ")} L${pts.filter(p=>p.yNom).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#gnN)"/><path d={pathNom} fill="none" stroke={C.red} strokeWidth="2" strokeLinejoin="round" strokeDasharray="5,3"/></>}
-                      {pathReal&&<><path d={`M${pts.filter(p=>p.yReal)[0]?.x},${PT+cH} ${pts.filter(p=>p.yReal).map(p=>`L${p.x},${p.yReal}`).join(" ")} L${pts.filter(p=>p.yReal).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#gnR)"/><path d={pathReal} fill="none" stroke={C.green} strokeWidth="2.5" strokeLinejoin="round"/></>}
+                      <path d={areaNom} fill="url(#gnN)"/>
+                      <path d={areaReal} fill="url(#gnR)"/>
+                      <path d={pathNom} fill="none" stroke={C.red} strokeWidth="2" strokeLinejoin="round" strokeDasharray="5,3"/>
+                      <path d={pathReal} fill="none" stroke={C.green} strokeWidth="2.5" strokeLinejoin="round"/>
                       {pts.map((p,i)=><g key={i}>
-                        {p.yNom&&<circle cx={p.x} cy={p.yNom} r="3" fill={C.red}/>}
-                        {p.yReal&&<circle cx={p.x} cy={p.yReal} r="3.5" fill={C.green}/>}
-                        {p.ipcMes&&<text x={p.x} y={PT-8} textAnchor="middle" fill={C.amber} fontSize="8" fontFamily="sans-serif">{p.ipcMes}%</text>}
-                        <text x={p.x} y={H-6} textAnchor="middle" fill={i===selMonth?C.blue:C.t3} fontSize="9" fontFamily="sans-serif" fontWeight={i===selMonth?"700":"400"}>{MONTHS[i]}</text>
+                        <circle cx={p.x} cy={p.yNom} r="3" fill={C.red}/>
+                        <circle cx={p.x} cy={p.yReal} r="3.5" fill={C.green}/>
+                        {p.ipcMes&&<text x={p.x} y={PT-6} textAnchor="middle" fill={C.amber} fontSize="8" fontFamily="sans-serif">{p.ipcMes}%</text>}
+                        <text x={p.x} y={H-6} textAnchor="middle" fill={p.m===selMonth?C.blue:C.t3} fontSize="9" fontFamily="sans-serif" fontWeight={p.m===selMonth?"700":"400"}>{MONTHS[p.m]}</text>
                       </g>)}
                     </svg>
                     <div style={{display:"flex",gap:16,fontSize:11,color:C.t2,marginTop:4,flexWrap:"wrap"}}>
                       <span><span style={{display:"inline-block",width:16,height:2,background:C.red,borderRadius:2,marginRight:5,verticalAlign:"middle",opacity:0.7}}/>Gasto nominal</span>
                       <span><span style={{display:"inline-block",width:16,height:2,background:C.green,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Gasto en pesos de hoy</span>
-                      <span style={{color:C.amber}}><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.amber,marginRight:5,verticalAlign:"middle"}}/>IPC del mes (sobre el gráfico)</span>
+                      <span style={{color:C.amber}}><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.amber,marginRight:5,verticalAlign:"middle"}}/>IPC del mes (arriba de cada punto)</span>
                     </div>
                   </>;
                 })()}
               </Card>
 
-              {/* ── Gráfico 2: sueldo vs gasto real ── */}
-              <Card title="Ingreso real vs Gasto real" subtitle="Ambos ajustados por inflación — muestra si tu poder adquisitivo sube o baja">
+              {/* ── Gráfico 2: ingreso real vs gasto real ── */}
+              <Card title="Ingreso real vs Gasto real" subtitle="Ambos ajustados por IPC — muestra si tu poder adquisitivo sube o baja">
                 {(()=>{
-                  const maxIG=Math.max(...meses.map(x=>Math.max(x.ingresoReal,x.gastoReal)),1);
-                  const ptsI=meses.map((m2,i)=>({x:PL+(i/11)*cW, y:m2.ingresoReal>0?PT+cH*(1-m2.ingresoReal/maxIG):null}));
-                  const ptsG=meses.map((m2,i)=>({x:PL+(i/11)*cW, y:m2.gastoReal>0?PT+cH*(1-m2.gastoReal/maxIG):null}));
-                  const pI=ptsI.filter(p=>p.y!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
-                  const pG=ptsG.filter(p=>p.y!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
-                  if(!pI&&!pG) return<div style={{fontSize:12,color:C.t3,padding:"20px 0",textAlign:"center"}}>Sin datos de ingresos o gastos para este año.</div>;
+                  const mesIG=meses.filter(m2=>m2.ingresoNominal>0||m2.gastoNominal>0);
+                  if(mesIG.length===0) return<div style={{fontSize:12,color:C.t3,padding:"20px 0",textAlign:"center"}}>Sin datos de ingresos o gastos para este año.</div>;
+                  const maxIG=Math.max(...mesIG.map(x=>Math.max(x.ingresoReal,x.gastoReal)),1);
+                  const toYIG=(v)=>PT+cH*(1-(v/maxIG));
+                  const ptsI=mesIG.filter(m2=>m2.ingresoReal>0).map(m2=>({x:PL+(m2.m/11)*cW, y:toYIG(m2.ingresoReal), m:m2.m}));
+                  const ptsG=mesIG.filter(m2=>m2.gastoReal>0).map(m2=>({x:PL+(m2.m/11)*cW, y:toYIG(m2.gastoReal), m:m2.m, exc:m2.gastoReal>m2.ingresoReal&&m2.ingresoReal>0}));
+                  const pI=ptsI.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  const pG=ptsG.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  const floorIG=PT+cH;
                   return<>
                     <svg viewBox={`0 0 ${W} ${H}`} style={svgStyle} xmlns="http://www.w3.org/2000/svg">
                       <defs>
@@ -1902,18 +2084,14 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                           <text x={PL-5} y={y+4} textAnchor="end" fill={C.t3} fontSize="9" fontFamily="sans-serif">{v>=1000?Math.round(v/1000)+"K":v}</text>
                         </g>;
                       })}
-                      {pG&&<><path d={`M${ptsG.filter(p=>p.y)[0]?.x},${PT+cH} ${ptsG.filter(p=>p.y).map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsG.filter(p=>p.y).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#ggR)"/><path d={pG} fill="none" stroke={C.red} strokeWidth="2" strokeLinejoin="round"/></>}
-                      {pI&&<><path d={`M${ptsI.filter(p=>p.y)[0]?.x},${PT+cH} ${ptsI.filter(p=>p.y).map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsI.filter(p=>p.y).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#giR)"/><path d={pI} fill="none" stroke={C.green} strokeWidth="2.5" strokeLinejoin="round"/></>}
-                      {meses.map((m2,i)=>{
-                        const px=PL+(i/11)*cW;
-                        const isExc=m2.gastoReal>m2.ingresoReal&&m2.ingresoReal>0;
-                        return<g key={i}>
-                          {ptsI[i].y&&<circle cx={px} cy={ptsI[i].y} r="3.5" fill={C.green}/>}
-                          {ptsG[i].y&&<circle cx={px} cy={ptsG[i].y} r="3" fill={isExc?C.red:C.red} opacity={isExc?1:0.6}/>}
-                          {isExc&&<text x={px} y={PT-8} textAnchor="middle" fill={C.red} fontSize="9" fontFamily="sans-serif">⚠</text>}
-                          <text x={px} y={H-6} textAnchor="middle" fill={i===selMonth?C.blue:C.t3} fontSize="9" fontFamily="sans-serif" fontWeight={i===selMonth?"700":"400"}>{MONTHS[i]}</text>
-                        </g>;
-                      })}
+                      {pG.length>0&&<><path d={`M${ptsG[0].x},${floorIG} ${ptsG.map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsG[ptsG.length-1].x},${floorIG} Z`} fill="url(#ggR)"/><path d={pG} fill="none" stroke={C.red} strokeWidth="2" strokeLinejoin="round"/></>}
+                      {pI.length>0&&<><path d={`M${ptsI[0].x},${floorIG} ${ptsI.map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsI[ptsI.length-1].x},${floorIG} Z`} fill="url(#giR)"/><path d={pI} fill="none" stroke={C.green} strokeWidth="2.5" strokeLinejoin="round"/></>}
+                      {ptsI.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="3.5" fill={C.green}/>)}
+                      {ptsG.map((p,i)=><g key={i}>
+                        <circle cx={p.x} cy={p.y} r="3" fill={C.red} opacity={p.exc?1:0.6}/>
+                        {p.exc&&<text x={p.x} y={PT-6} textAnchor="middle" fill={C.red} fontSize="10" fontFamily="sans-serif">⚠</text>}
+                        <text x={p.x} y={H-6} textAnchor="middle" fill={p.m===selMonth?C.blue:C.t3} fontSize="9" fontFamily="sans-serif" fontWeight={p.m===selMonth?"700":"400"}>{MONTHS[p.m]}</text>
+                      </g>)}
                     </svg>
                     <div style={{display:"flex",gap:16,fontSize:11,color:C.t2,marginTop:4}}>
                       <span><span style={{display:"inline-block",width:14,height:2,background:C.green,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Ingreso real</span>
@@ -1979,6 +2157,273 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                   })}
                 </div>
               </Card>}
+            </>}
+          </>;
+        })()}
+
+        {/* DÓLAR */}
+        {tab==="dólar"&&(()=>{
+          // ── Agrupamos TC histórico por mes ──────────────────────────────────
+          // tcHistData = { oficial:[{fecha,compra,venta},...], blue:[...] }
+          const agruparPorMes=(arr)=>{
+            const map={};
+            if(!arr) return map;
+            arr.forEach(x=>{
+              const ym=x.fecha.slice(0,7); // "YYYY-MM"
+              if(!map[ym]) map[ym]={sum:0,count:0,max:0,min:Infinity};
+              const v=x.venta||0;
+              map[ym].sum+=v; map[ym].count++; map[ym].max=Math.max(map[ym].max,v); map[ym].min=Math.min(map[ym].min,v);
+            });
+            Object.keys(map).forEach(k=>{map[k].avg=Math.round(map[k].sum/map[k].count);});
+            return map;
+          };
+          const ofMap=agruparPorMes(tcHistData?.oficial);
+          const blMap=agruparPorMes(tcHistData?.blue);
+
+          // IPC mensual
+          const ipcMap2={};
+          if(inflData) inflData.forEach(x=>{ipcMap2[x.fecha.slice(0,7)]=x.valor;});
+
+          // Construir serie de meses con datos (últimos 24 meses max)
+          const hoy=new Date();
+          const serieYM=[];
+          for(let i=23;i>=0;i--){
+            const d=new Date(hoy.getFullYear(),hoy.getMonth()-i,1);
+            serieYM.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+          }
+          const serieFilt=serieYM.filter(ym=>ofMap[ym]||blMap[ym]);
+
+          // Brecha cambiaria por mes
+          const brecha=serieFilt.map(ym=>{
+            const of=ofMap[ym]?.avg||null;
+            const bl=blMap[ym]?.avg||null;
+            const gap=of&&bl?Math.round(((bl-of)/of)*100):null;
+            return{ym,of,bl,gap,ipc:ipcMap2[ym]||null,label:ym.slice(5,7)+"/"+ym.slice(2,4)};
+          });
+
+          // Gasto mensual del usuario en USD equivalente (usando TC oficial)
+          const gastoEnUSD=serieFilt.map(ym=>{
+            const [y,m]=ym.split("-").map(Number);
+            const gNom=gastos.filter(g=>g.year===y&&g.month===m-1).reduce((s,x)=>s+Number(x.monto),0);
+            const iNom=ingresos.filter(i=>i.year===y&&i.month===m-1).reduce((s,x)=>s+Number(x.monto),0);
+            const tcOf=ofMap[ym]?.avg||null;
+            const tcBl=blMap[ym]?.avg||null;
+            return{ym,label:ym.slice(5,7)+"/"+ym.slice(2,4),gNom,iNom,gUSDOf:tcOf?Math.round(gNom/tcOf):null,iUSDOf:tcOf?Math.round(iNom/tcOf):null,gUSDBl:tcBl?Math.round(gNom/tcBl):null,iUSDBl:tcBl?Math.round(iNom/tcBl):null};
+          }).filter(x=>x.gNom>0||x.iNom>0);
+
+          const W2=560,PL2=52,PR2=12,PT2=24,PB2=32;
+          const cW2=W2-PL2-PR2, cH2=120;
+          const H2=PT2+cH2+PB2;
+          const svgS={width:"100%",maxHeight:190,display:"block"};
+          const CardD=({title,subtitle,children})=>(
+            <div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.bd}`,borderRadius:14,padding:"18px 20px",marginBottom:16,boxShadow:"0 4px 20px rgba(0,0,0,0.2)"}}>
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:12,fontWeight:600,color:C.t}}>{title}</div>
+                {subtitle&&<div style={{fontSize:11,color:C.t3,marginTop:2}}>{subtitle}</div>}
+              </div>
+              {children}
+            </div>
+          );
+
+          // Último mes disponible
+          const last=brecha[brecha.length-1];
+          const prev=brecha[brecha.length-2];
+
+          return <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:600}}>💵 Dólar & Brecha Cambiaria</div>
+                <div style={{fontSize:12,color:C.t3,marginTop:2}}>Evolución histórica · Comparativa con IPC · Tus gastos en USD</div>
+              </div>
+              <button onClick={()=>{setTcHistData(null);setInflData(null);fetchTCHistorico();fetchInflacion();}} style={{background:C.bg3,border:`1px solid ${C.bd2}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",color:C.t3,fontSize:11}}>↻ Actualizar</button>
+            </div>
+
+            {(tcHistLoading||inflLoading)&&<div style={{textAlign:"center",padding:"40px 0",color:C.t3,fontSize:13}}>
+              <div style={{display:"flex",justifyContent:"center",gap:5,marginBottom:10}}>{[0,0.15,0.3].map((d,i)=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:C.blue,animation:`pulse 1s ${d}s infinite`}}/>)}</div>
+              Cargando cotizaciones históricas...
+            </div>}
+
+            {(tcHistError||inflError)&&<div style={{background:C.red+"18",border:`1px solid ${C.red}33`,borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:13,color:C.red}}>{tcHistError||inflError}</div>}
+
+            {!tcHistLoading&&tcHistData&&<>
+              {/* Cards resumen */}
+              <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+                <MCard label="Oficial hoy" value={last?.of?`$${last.of.toLocaleString("es-AR")}`:allTC.find(t=>t.id==="oficial")?.venta?`$${allTC.find(t=>t.id==="oficial").venta.toLocaleString("es-AR")}`:tc?`$${tc.toLocaleString("es-AR")}`:"—"} color={C.blue} icon="dollar" sub="Promedio último mes"/>
+                <MCard label="Blue hoy" value={last?.bl?`$${last.bl.toLocaleString("es-AR")}`:allTC.find(t=>t.id==="blue")?.venta?`$${allTC.find(t=>t.id==="blue").venta.toLocaleString("es-AR")}`:"-"} color={C.green} icon="trend" sub="Promedio último mes"/>
+                <MCard label="Brecha" value={last?.gap!=null?`${last.gap}%`:"—"} color={last?.gap>100?C.red:last?.gap>50?C.amber:C.green} icon="activity" sub={prev?.gap!=null?`Mes ant: ${prev.gap}%`:""}/>
+                <MCard label="IPC último mes" value={last?.ipc!=null?`${last.ipc}%`:"—"} color={C.amber} icon="flag" sub={last?.ym||""}/>
+              </div>
+
+              {/* Gráfico 1: Oficial vs Blue histórico */}
+              {serieFilt.length>1&&<CardD title="Dólar Oficial vs Blue — últimos 24 meses" subtitle="Promedio mensual de cotización venta">
+                {(()=>{
+                  const maxTC=Math.max(...brecha.map(x=>Math.max(x.of||0,x.bl||0)),1);
+                  const n=brecha.length;
+                  const xOf=brecha.filter(x=>x.of).map((x,i)=>({x:PL2+(brecha.indexOf(x)/(n-1||1))*cW2,y:PT2+cH2*(1-x.of/maxTC),v:x.of,lb:x.label}));
+                  const xBl=brecha.filter(x=>x.bl).map((x,i)=>({x:PL2+(brecha.indexOf(x)/(n-1||1))*cW2,y:PT2+cH2*(1-x.bl/maxTC),v:x.bl,lb:x.label}));
+                  const pOf=xOf.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  const pBl=xBl.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  return<>
+                    <svg viewBox={`0 0 ${W2} ${H2}`} style={svgS} xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="tcOf" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.blue} stopOpacity="0.2"/><stop offset="100%" stopColor={C.blue} stopOpacity="0"/></linearGradient>
+                        <linearGradient id="tcBl" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity="0.2"/><stop offset="100%" stopColor={C.green} stopOpacity="0"/></linearGradient>
+                      </defs>
+                      {[0,0.25,0.5,0.75,1].map((f,i)=>{
+                        const v=Math.round(maxTC*f);
+                        const y=PT2+cH2*(1-f);
+                        return<g key={i}>
+                          <line x1={PL2} y1={y} x2={W2-PR2} y2={y} stroke={C.bd} strokeWidth="0.5"/>
+                          <text x={PL2-4} y={y+4} textAnchor="end" fill={C.t3} fontSize="8" fontFamily="sans-serif">{v>=1000?Math.round(v/1000)+"K":v}</text>
+                        </g>;
+                      })}
+                      {pBl&&<><path d={`M${xBl[0].x},${PT2+cH2} ${xBl.map(p=>`L${p.x},${p.y}`).join(" ")} L${xBl[xBl.length-1].x},${PT2+cH2} Z`} fill="url(#tcBl)"/><path d={pBl} fill="none" stroke={C.green} strokeWidth="2" strokeLinejoin="round"/></>}
+                      {pOf&&<><path d={`M${xOf[0].x},${PT2+cH2} ${xOf.map(p=>`L${p.x},${p.y}`).join(" ")} L${xOf[xOf.length-1].x},${PT2+cH2} Z`} fill="url(#tcOf)"/><path d={pOf} fill="none" stroke={C.blue} strokeWidth="2" strokeLinejoin="round"/></>}
+                      {brecha.map((b,i)=>{
+                        const x=PL2+(i/(n-1||1))*cW2;
+                        const showLbl=i===0||i===n-1||(n>8&&i%Math.ceil(n/6)===0);
+                        return<g key={i}>
+                          {b.of&&<circle cx={x} cy={PT2+cH2*(1-b.of/maxTC)} r="2.5" fill={C.blue}/>}
+                          {b.bl&&<circle cx={x} cy={PT2+cH2*(1-b.bl/maxTC)} r="2.5" fill={C.green}/>}
+                          {showLbl&&<text x={x} y={H2-4} textAnchor="middle" fill={C.t3} fontSize="8" fontFamily="sans-serif">{b.label}</text>}
+                        </g>;
+                      })}
+                    </svg>
+                    <div style={{display:"flex",gap:16,fontSize:11,color:C.t2,marginTop:4}}>
+                      <span><span style={{display:"inline-block",width:14,height:2,background:C.blue,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Oficial</span>
+                      <span><span style={{display:"inline-block",width:14,height:2,background:C.green,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Blue</span>
+                    </div>
+                  </>;
+                })()}
+              </CardD>}
+
+              {/* Gráfico 2: Brecha + IPC comparados */}
+              {serieFilt.length>1&&<CardD title="Brecha cambiaria vs IPC mensual" subtitle="Verde = brecha (%), Ámbar = IPC del mes (%). Permiten ver si el dólar corre más o menos que la inflación">
+                {(()=>{
+                  const brechaConIPC=brecha.filter(x=>x.gap!=null||x.ipc!=null);
+                  if(brechaConIPC.length<2) return<div style={{fontSize:12,color:C.t3,padding:"16px 0",textAlign:"center"}}>Insuficientes datos para comparar.</div>;
+                  const maxBI=Math.max(...brechaConIPC.map(x=>Math.max(x.gap||0,x.ipc||0)),1);
+                  const nb=brechaConIPC.length;
+                  return<>
+                    <svg viewBox={`0 0 ${W2} ${H2}`} style={svgS} xmlns="http://www.w3.org/2000/svg">
+                      {[0,0.5,1].map((f,i)=>{
+                        const v=Math.round(maxBI*f);
+                        const y=PT2+cH2*(1-f);
+                        return<g key={i}>
+                          <line x1={PL2} y1={y} x2={W2-PR2} y2={y} stroke={C.bd} strokeWidth="0.5"/>
+                          <text x={PL2-4} y={y+4} textAnchor="end" fill={C.t3} fontSize="8" fontFamily="sans-serif">{v}%</text>
+                        </g>;
+                      })}
+                      {/* Barras IPC */}
+                      {brechaConIPC.map((b,i)=>{
+                        if(!b.ipc) return null;
+                        const x=PL2+(i/(nb-1||1))*cW2;
+                        const bW=Math.max(6,cW2/nb-4);
+                        const bH=(b.ipc/maxBI)*cH2;
+                        return<rect key={i} x={x-bW/2} y={PT2+cH2-bH} width={bW} height={bH} fill={C.amber} opacity="0.5" rx="2"/>;
+                      })}
+                      {/* Línea brecha */}
+                      {(()=>{
+                        const pts=brechaConIPC.filter(x=>x.gap!=null).map((x,i)=>({x:PL2+(brechaConIPC.indexOf(x)/(nb-1||1))*cW2, y:PT2+cH2*(1-(x.gap/maxBI))}));
+                        if(pts.length<2) return null;
+                        const p=pts.map((pt,i)=>`${i===0?"M":"L"}${pt.x},${pt.y}`).join(" ");
+                        return<><path d={p} fill="none" stroke={C.green} strokeWidth="2" strokeLinejoin="round"/>{pts.map((pt,i)=><circle key={i} cx={pt.x} cy={pt.y} r="3" fill={C.green}/>)}</>;
+                      })()}
+                      {brechaConIPC.map((b,i)=>{
+                        const x=PL2+(i/(nb-1||1))*cW2;
+                        const showLbl=i===0||i===nb-1||(nb>8&&i%Math.ceil(nb/6)===0);
+                        return showLbl?<text key={i} x={x} y={H2-4} textAnchor="middle" fill={C.t3} fontSize="8" fontFamily="sans-serif">{b.label}</text>:null;
+                      })}
+                    </svg>
+                    <div style={{display:"flex",gap:16,fontSize:11,color:C.t2,marginTop:4}}>
+                      <span><span style={{display:"inline-block",width:14,height:2,background:C.green,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Brecha cambiaria %</span>
+                      <span><span style={{display:"inline-block",width:10,height:10,background:C.amber,borderRadius:2,marginRight:5,verticalAlign:"middle",opacity:0.7}}/>IPC mensual %</span>
+                    </div>
+                  </>;
+                })()}
+              </CardD>}
+
+              {/* Gráfico 3: Tus gastos en USD */}
+              {gastoEnUSD.length>0&&<CardD title="Tus gastos mensuales en USD" subtitle="Convertidos al tipo de cambio oficial promedio de cada mes — muestra tu poder adquisitivo real en dólares">
+                {(()=>{
+                  const maxUSD=Math.max(...gastoEnUSD.map(x=>Math.max(x.gUSDOf||0,x.iUSDOf||0)),1);
+                  const ng=gastoEnUSD.length;
+                  const ptsGU=gastoEnUSD.filter(x=>x.gUSDOf).map(x=>({x:PL2+(gastoEnUSD.indexOf(x)/(ng-1||1))*cW2,y:PT2+cH2*(1-x.gUSDOf/maxUSD),v:x.gUSDOf,lb:x.label}));
+                  const ptsIU=gastoEnUSD.filter(x=>x.iUSDOf).map(x=>({x:PL2+(gastoEnUSD.indexOf(x)/(ng-1||1))*cW2,y:PT2+cH2*(1-x.iUSDOf/maxUSD),v:x.iUSDOf,lb:x.label}));
+                  const pG2=ptsGU.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  const pI2=ptsIU.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  return<>
+                    <svg viewBox={`0 0 ${W2} ${H2}`} style={svgS} xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="guG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.red} stopOpacity="0.2"/><stop offset="100%" stopColor={C.red} stopOpacity="0"/></linearGradient>
+                        <linearGradient id="guI" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity="0.2"/><stop offset="100%" stopColor={C.green} stopOpacity="0"/></linearGradient>
+                      </defs>
+                      {[0,0.25,0.5,0.75,1].map((f,i)=>{
+                        const v=Math.round(maxUSD*f);
+                        const y=PT2+cH2*(1-f);
+                        return<g key={i}>
+                          <line x1={PL2} y1={y} x2={W2-PR2} y2={y} stroke={C.bd} strokeWidth="0.5"/>
+                          <text x={PL2-4} y={y+4} textAnchor="end" fill={C.t3} fontSize="8" fontFamily="sans-serif">U$D {v}</text>
+                        </g>;
+                      })}
+                      {pG2&&<><path d={`M${ptsGU[0].x},${PT2+cH2} ${ptsGU.map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsGU[ptsGU.length-1].x},${PT2+cH2} Z`} fill="url(#guG)"/><path d={pG2} fill="none" stroke={C.red} strokeWidth="2" strokeLinejoin="round"/></>}
+                      {pI2&&<><path d={`M${ptsIU[0].x},${PT2+cH2} ${ptsIU.map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsIU[ptsIU.length-1].x},${PT2+cH2} Z`} fill="url(#guI)"/><path d={pI2} fill="none" stroke={C.green} strokeWidth="2.5" strokeLinejoin="round"/></>}
+                      {ptsGU.map((p,i)=><g key={i}>
+                        <circle cx={p.x} cy={p.y} r="3" fill={C.red}/>
+                        <text x={p.x} y={H2-4} textAnchor="middle" fill={C.t3} fontSize="8" fontFamily="sans-serif">{p.lb}</text>
+                      </g>)}
+                      {ptsIU.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="3" fill={C.green}/>)}
+                    </svg>
+                    <div style={{display:"flex",gap:16,fontSize:11,color:C.t2,marginTop:4}}>
+                      <span><span style={{display:"inline-block",width:14,height:2,background:C.green,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Ingreso en USD</span>
+                      <span><span style={{display:"inline-block",width:14,height:2,background:C.red,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Gasto en USD</span>
+                      <span style={{color:C.t3}}>TC oficial promedio mensual</span>
+                    </div>
+                  </>;
+                })()}
+              </CardD>}
+
+              {/* Tabla resumen mensual */}
+              {brecha.length>0&&<CardD title="Tabla histórica mensual" subtitle="Oficial · Blue · Brecha · IPC">
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:480}}>
+                    <thead>
+                      <tr style={{borderBottom:`1px solid ${C.bd}`}}>
+                        {["Mes","Oficial","Blue","Brecha","IPC","Dólar vs IPC"].map((h,i)=>(
+                          <th key={i} style={{padding:"7px 10px",textAlign:i>=1?"right":"left",fontSize:10,fontWeight:400,color:C.t3,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...brecha].reverse().slice(0,18).map((b,i)=>{
+                        // Dólar vs IPC: si el dólar subió más que el IPC ese mes, "ganó" el dólar
+                        const varOf=i<brecha.length-1?(()=>{
+                          const prev2=[...brecha].reverse()[i+1];
+                          if(!prev2?.of||!b.of) return null;
+                          return((b.of-prev2.of)/prev2.of)*100;
+                        })():null;
+                        const dVsIPC=varOf!=null&&b.ipc!=null?varOf-b.ipc:null;
+                        const col=dVsIPC===null?C.t3:dVsIPC>5?C.blue:dVsIPC>0?C.blue:C.red;
+                        return<tr key={i} style={{borderBottom:`1px solid ${C.bd}`}}>
+                          <td style={{padding:"7px 10px",color:C.t2,fontWeight:500}}>{b.label}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",color:C.blue}}>{b.of?`$${b.of.toLocaleString("es-AR")}`:"—"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",color:C.green}}>{b.bl?`$${b.bl.toLocaleString("es-AR")}`:"—"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",color:b.gap>100?C.red:b.gap>50?C.amber:C.t2}}>{b.gap!=null?`${b.gap}%`:"—"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",color:C.amber}}>{b.ipc!=null?`${b.ipc}%`:"—"}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right"}}>
+                            <span style={{background:col+"22",color:col,fontWeight:600,fontSize:11,padding:"2px 8px",borderRadius:12}}>
+                              {dVsIPC===null?"—":(dVsIPC>0?"📈":"📉")+" "+(dVsIPC>0?"+":"")+dVsIPC.toFixed(1)+"%"}
+                            </span>
+                          </td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{marginTop:10,fontSize:11,color:C.t3}}>
+                  "Dólar vs IPC" = variación mensual del dólar oficial menos el IPC de ese mes. Positivo = el dólar corrió más que la inflación.
+                </div>
+              </CardD>}
             </>}
           </>;
         })()}
@@ -2292,6 +2737,16 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           <div style={{marginTop:6,color:C.t3,fontSize:11}}>Powered by Gemini 2.0 Flash via OpenRouter · Datos del período actual</div>
         </div>}
       </Modal>}
+
+      {/* MODAL CARGA RÁPIDA */}
+      {quickModal&&<QuickAddModal
+        quickType={quickType} setQuickType={setQuickType}
+        cats={cats} MEDIOS_PAGO={MEDIOS_PAGO} todayISO={todayISO}
+        tc={tc} C={C} inp={inp} sel={sel}
+        quickSaving={quickSaving} quickError={quickError} quickOk={quickOk}
+        saveQuick={saveQuick} setQuickError={setQuickError}
+        onClose={()=>setQuickModal(false)}
+      />}
 
       {/* MODAL EDITAR GASTO */}
       {editGastoModal&&editGastoDraft&&(()=>{
