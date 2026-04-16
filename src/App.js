@@ -464,6 +464,57 @@ function Dashboard({ session }) {
     setGastos(gs=>gs.filter(g=>g.id!==id));
   };
 
+  const openEditGasto=(g)=>{
+    // Convertir fecha "DD/MM/YYYY" a "YYYY-MM-DD" para el input type=date
+    let fechaISO=todayISO();
+    if(g.fecha){
+      const parts=g.fecha.split("/");
+      if(parts.length===3) fechaISO=`${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;
+    }
+    setEditGastoDraft({...g, fechaISO});
+    setEditGastoError("");
+    setEditGastoModal(true);
+  };
+
+  const saveEditGasto=async()=>{
+    if(!editGastoDraft) return;
+    if(!editGastoDraft.monto||isNaN(editGastoDraft.monto)){setEditGastoError("El monto es obligatorio.");return;}
+    setEditGastoLoading(true);setEditGastoError("");
+    const cat=cats.find(c=>c.id===editGastoDraft.cat);
+    const sub=cat?.items.find(s=>s.id===editGastoDraft.sub);
+    const d=new Date(editGastoDraft.fechaISO+"T12:00:00");
+    const fYear=d.getFullYear(), fMonth=d.getMonth();
+    const fechaFmt=d.toLocaleDateString("es-AR");
+    const updates={
+      cat:editGastoDraft.cat, sub:editGastoDraft.sub,
+      monto:parseFloat(editGastoDraft.monto),
+      descripcion:editGastoDraft.descripcion||null,
+      medio_pago:editGastoDraft.medio_pago||"efectivo",
+      fecha:fechaFmt, year:fYear, month:fMonth,
+      cat_label:cat?.label, sub_label:sub?.label,
+      sub_icon:sub?.icon, cat_color:cat?.color, cat_icon:cat?.icon,
+    };
+    const {error}=await supabase.from("gastos").update(updates).eq("id",editGastoDraft.id).eq("user_id",userId);
+    if(error){setEditGastoError("Error al guardar: "+error.message);setEditGastoLoading(false);return;}
+    setGastos(gs=>gs.map(g=>g.id===editGastoDraft.id?{...g,...updates}:g));
+    setEditGastoModal(false);
+    setEditGastoDraft(null);
+    setEditGastoLoading(false);
+  };
+
+  // ─── FETCH IPC INDEC (argentinadatos.com) ──────────────────────────────────
+  const fetchInflacion=async()=>{
+    if(inflData) return;
+    setInflLoading(true); setInflError("");
+    try{
+      const r=await fetch("https://api.argentinadatos.com/v1/finanzas/indices/inflacion");
+      const j=await r.json();
+      if(Array.isArray(j)&&j.length>0) setInflData(j);
+      else setInflError("Sin datos de inflación disponibles.");
+    }catch(e){ setInflError("Error al obtener IPC: "+e.message); }
+    setInflLoading(false);
+  };
+
   const addIngreso=async()=>{
     if(!ingForm.monto||isNaN(ingForm.monto))return;
     const d=new Date(ingForm.fecha+"T12:00:00");
@@ -571,6 +622,17 @@ function Dashboard({ session }) {
   const [aiCargaImageName,setAiCargaImageName]=useState("");
   const [aiCargaExcelName,setAiCargaExcelName]=useState("");
   const [aiCargaExcelPreview,setAiCargaExcelPreview]=useState([]); // filas crudas para preview
+
+  // ─── EDITAR GASTO ─────────────────────────────────────────────────────────
+  const [editGastoModal,setEditGastoModal]=useState(false);
+  const [editGastoDraft,setEditGastoDraft]=useState(null); // gasto en edición
+  const [editGastoLoading,setEditGastoLoading]=useState(false);
+  const [editGastoError,setEditGastoError]=useState("");
+
+  // ─── INFLACIÓN ─────────────────────────────────────────────────────────────
+  const [inflData,setInflData]=useState(null); // datos IPC de la API
+  const [inflLoading,setInflLoading]=useState(false);
+  const [inflError,setInflError]=useState("");
 
   const OR_KEY="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";
 
@@ -946,9 +1008,9 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           </div>
         </div>
         <div style={{display:"flex",overflowX:"auto"}}>
-          {["dashboard","gastos","ingresos","reporte","categorías","presupuesto","gráficos","ayuda"].map(t=>(
-            <button key={t} onClick={()=>setTab(t)} style={{padding:"10px 14px",fontSize:13,border:"none",cursor:"pointer",background:"transparent",color:tab===t?C.t:C.t2,fontWeight:tab===t?500:400,borderBottom:tab===t?`2px solid ${t==="ayuda"?C.purple:t==="gráficos"?C.amber:C.blue}`:"2px solid transparent",whiteSpace:"nowrap",textTransform:"capitalize"}}>
-              {t==="ayuda"?"❓ Ayuda":t==="gráficos"?"📊 Gráficos":t}{t==="presupuesto"&&budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length>0&&<span style={{marginLeft:5,background:C.red,color:"#fff",borderRadius:9,fontSize:10,padding:"1px 5px"}}>{budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length}</span>}
+          {["dashboard","gastos","ingresos","reporte","categorías","presupuesto","gráficos","inflación","ayuda"].map(t=>(
+            <button key={t} onClick={()=>{setTab(t);if(t==="inflación")fetchInflacion();}} style={{padding:"10px 14px",fontSize:13,border:"none",cursor:"pointer",background:"transparent",color:tab===t?C.t:C.t2,fontWeight:tab===t?500:400,borderBottom:tab===t?`2px solid ${t==="ayuda"?C.purple:t==="gráficos"?C.amber:t==="inflación"?C.green:C.blue}`:"2px solid transparent",whiteSpace:"nowrap",textTransform:"capitalize"}}>
+              {t==="ayuda"?"❓ Ayuda":t==="gráficos"?"📊 Gráficos":t==="inflación"?"📈 Inflación":t}{t==="presupuesto"&&budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length>0&&<span style={{marginLeft:5,background:C.red,color:"#fff",borderRadius:9,fontSize:10,padding:"1px 5px"}}>{budAlerts.filter(a=>a.pct>=100&&!dismissedAlerts.has("bud_"+a.key)).length}</span>}
             </button>
           ))}
         </div>
@@ -1201,7 +1263,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                       {g.tc_at_time&&<div style={{fontSize:10,color:C.t3}}>TC: ${g.tc_at_time.toLocaleString("es-AR")}</div>}
                     </td>
                     <td style={{padding:"9px 16px",textAlign:"right",fontWeight:500}}>-{fmtTx(g.monto,currency,tc,g.tc_at_time)}</td>
-                    <td style={{padding:"9px 16px",textAlign:"right"}}>{viewMode==="month"&&<button onClick={()=>delGasto(g.id)} style={{background:"none",border:"none",cursor:"pointer",color:C.t3,fontSize:16}}>×</button>}</td>
+                    <td style={{padding:"9px 16px",textAlign:"right"}}>{viewMode==="month"&&<div style={{display:"flex",gap:4,justifyContent:"flex-end"}}><button onClick={()=>openEditGasto(g)} title="Editar" style={{background:C.blue+"18",border:`1px solid ${C.blue}33`,borderRadius:6,cursor:"pointer",color:C.blue,fontSize:11,padding:"3px 8px"}}>✎</button><button onClick={()=>delGasto(g.id)} title="Eliminar" style={{background:"none",border:"none",cursor:"pointer",color:C.t3,fontSize:16}}>×</button></div>}</td>
                   </tr>;
                 })}</tbody>
                 <tfoot><tr style={{background:C.bg3}}><td colSpan={4} style={{padding:"9px 16px",fontSize:12,color:C.t2,fontWeight:500}}>Subtotal</td><td style={{padding:"9px 16px",textAlign:"right",fontWeight:600,color:cat.color}}>-{fmt(total,currency,tc)}</td><td/></tr></tfoot>
@@ -1660,6 +1722,267 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           </>;
         })()}
 
+        {/* INFLACIÓN */}
+        {tab==="inflación"&&(()=>{
+          // ── Helpers ──────────────────────────────────────────────────────────
+          // inflData = [{fecha:"2024-01-01", valor:20.6}, ...]
+          // Construimos un mapa {YYYY-MM: pct} para lookups rápidos
+          const ipcMap={};
+          if(inflData) inflData.forEach(x=>{const k=x.fecha.slice(0,7);ipcMap[k]=x.valor;});
+
+          // Factor acumulado desde un mes base hasta un mes destino
+          // para "llevar" montos históricos a pesos de hoy
+          const factorAcum=(fromYM, toYM)=>{
+            if(!inflData) return 1;
+            let factor=1;
+            const sorted=[...inflData].sort((a,b)=>a.fecha>b.fecha?1:-1);
+            for(const d of sorted){
+              const ym=d.fecha.slice(0,7);
+              if(ym>fromYM && ym<=toYM) factor*=(1+d.valor/100);
+            }
+            return factor;
+          };
+
+          // Mes actual como "YYYY-MM"
+          const hoyClave=`${selYear}-${String(selMonth+1).padStart(2,"0")}`;
+
+          // ── Datos por mes para el año seleccionado ───────────────────────────
+          const meses=MONTHS.map((_,m)=>{
+            const clave=`${selYear}-${String(m+1).padStart(2,"0")}`;
+            const gastoNominal=gastos.filter(g=>g.year===selYear&&g.month===m).reduce((s,x)=>s+Number(x.monto),0);
+            const ingresoNominal=ingresos.filter(i=>i.year===selYear&&i.month===m).reduce((s,x)=>s+Number(x.monto),0);
+            const ipcMes=ipcMap[clave]||null;
+            // Factor para traer ese mes a "pesos de hoy" (mes seleccionado)
+            const factor=factorAcum(clave, hoyClave);
+            return{m, clave, gastoNominal, ingresoNominal, ipcMes, gastoReal:gastoNominal*factor, ingresoReal:ingresoNominal*factor, factor};
+          });
+
+          // ── Inflación acumulada del año ──────────────────────────────────────
+          const ipcAnual=meses.reduce((acc,mes)=>{
+            if(mes.ipcMes!==null) return acc*(1+mes.ipcMes/100);
+            return acc;
+          },1);
+          const inflAcumAnual=Math.round((ipcAnual-1)*100);
+
+          // ── Variación nominal de gastos por categoría vs mes anterior ────────
+          const gastosCatActual={}, gastosCatAnterior={};
+          const prevM=selMonth===0?11:selMonth-1;
+          const prevY=selMonth===0?selYear-1:selYear;
+          cats.forEach(c=>{
+            gastosCatActual[c.id]=gastos.filter(g=>g.year===selYear&&g.month===selMonth&&g.cat===c.id).reduce((s,x)=>s+Number(x.monto),0);
+            gastosCatAnterior[c.id]=gastos.filter(g=>g.year===prevY&&g.month===prevM&&g.cat===c.id).reduce((s,x)=>s+Number(x.monto),0);
+          });
+
+          // ── Inflación real sobre tus propios gastos ─────────────────────────
+          // Comparamos gasto nominal actual vs gasto real (ajustado) del mes anterior
+          const prevClave=`${prevY}-${String(prevM+1).padStart(2,"0")}`;
+          const factorMes=ipcMap[hoyClave]?1+ipcMap[hoyClave]/100:null;
+          const inflPropia=cats.map(c=>{
+            const act=gastosCatActual[c.id]||0;
+            const prev=gastosCatAnterior[c.id]||0;
+            if(prev===0||act===0) return{...c,act,prev,varNom:null,varReal:null};
+            const varNom=((act-prev)/prev)*100;
+            // inflación real = variación nominal - IPC del mes
+            const ipcM=ipcMap[hoyClave]||null;
+            const varReal=ipcM!==null?varNom-ipcM:null;
+            return{...c,act,prev,varNom,varReal};
+          }).filter(c=>c.act>0||c.prev>0);
+
+          // ── SVG helpers ──────────────────────────────────────────────────────
+          const W=560,PL=58,PR=16,PT=28,PB=36;
+          const cW=W-PL-PR, cH=130;
+          const H=PT+cH+PB;
+          const svgStyle={width:"100%",maxHeight:200,display:"block"};
+
+          const mesesConDatos=meses.filter(x=>x.gastoNominal>0||x.ingresoNominal>0);
+          const maxReal=Math.max(...meses.map(x=>Math.max(x.gastoReal,x.ingresoReal)),1);
+          const maxNom=Math.max(...meses.map(x=>Math.max(x.gastoNominal,x.ingresoNominal)),1);
+
+          const Card=({title,subtitle,badge,children})=>(
+            <div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.bd}`,borderRadius:14,padding:"18px 20px",marginBottom:16,boxShadow:"0 4px 20px rgba(0,0,0,0.2)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:600,color:C.t}}>{title}</div>
+                  {subtitle&&<div style={{fontSize:11,color:C.t3,marginTop:2}}>{subtitle}</div>}
+                </div>
+                {badge&&<div style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:badge.bg,color:badge.color,fontWeight:600}}>{badge.label}</div>}
+              </div>
+              {children}
+            </div>
+          );
+
+          return <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4,flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:600}}>📈 Inflación & Poder Adquisitivo</div>
+                <div style={{fontSize:12,color:C.t3,marginTop:2}}>Tus gastos e ingresos en pesos constantes · Año {selYear}</div>
+              </div>
+              <button onClick={()=>{setInflData(null);fetchInflacion();}} style={{background:C.bg3,border:`1px solid ${C.bd2}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",color:C.t3,fontSize:11}}>↻ Actualizar IPC</button>
+            </div>
+
+            {inflLoading&&<div style={{textAlign:"center",padding:"40px 0",color:C.t3,fontSize:13}}>
+              <div style={{display:"flex",justifyContent:"center",gap:5,marginBottom:10}}>{[0,0.15,0.3].map((d,i)=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:C.green,animation:`pulse 1s ${d}s infinite`}}/>)}</div>
+              Obteniendo datos de IPC desde argentinadatos.com...
+            </div>}
+
+            {inflError&&<div style={{background:C.red+"18",border:`1px solid ${C.red}33`,borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:13,color:C.red}}>{inflError}</div>}
+
+            {!inflLoading&&<>
+              {/* ── Cards resumen ── */}
+              <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+                <MCard label={`Inflación acumulada ${selYear}`} value={inflData?`${inflAcumAnual}%`:"—"} color={C.amber} icon="trend" sub="Datos IPC INDEC"/>
+                <MCard label="IPC último mes disponible" value={inflData?(()=>{const last=[...inflData].filter(x=>x.fecha.startsWith(selYear)||x.fecha.startsWith(selYear-1)).sort((a,b)=>b.fecha>a.fecha?1:-1);return last[0]?`${last[0].valor}%`:"—";})():"—"} color={C.red} icon="activity" sub={inflData?(()=>{const last=[...inflData].sort((a,b)=>b.fecha>a.fecha?1:-1);return last[0]?last[0].fecha.slice(0,7):"";})():""}/>
+                <MCard label="Var. gastos nom. vs mes ant." value={(()=>{const tA=Object.values(gastosCatActual).reduce((s,x)=>s+x,0);const tP=Object.values(gastosCatAnterior).reduce((s,x)=>s+x,0);if(!tP) return"—";const v=((tA-tP)/tP)*100;return(v>=0?"+":"")+v.toFixed(1)+"%";})()}  color={C.blue} icon="dollar" sub={`vs ${MONTHS[prevM]} ${prevY}`}/>
+                <MCard label="Inflación real de tus gastos" value={(()=>{const tA=Object.values(gastosCatActual).reduce((s,x)=>s+x,0);const tP=Object.values(gastosCatAnterior).reduce((s,x)=>s+x,0);if(!tP||!ipcMap[hoyClave]) return"—";const varNom=((tA-tP)/tP)*100;const varReal=varNom-ipcMap[hoyClave];return(varReal>=0?"+":"")+varReal.toFixed(1)+"%";})()}  color={C.purple} icon="flag" sub="Var. real = var. nominal − IPC"/>
+              </div>
+
+              {/* ── Gráfico 1: gastos nominales vs reales ── */}
+              <Card title={`Gastos nominales vs en pesos de ${MONTHS[selMonth]} ${selYear}`} subtitle="Los puntos verdes muestran cuánto representarían esos gastos hoy, ajustados por inflación acumulada" badge={inflData?{label:"IPC INDEC",bg:C.green+"22",color:C.green}:null}>
+                {!inflData?<div style={{fontSize:12,color:C.t3,padding:"20px 0",textAlign:"center"}}>Cargando datos de inflación...</div>:(()=>{
+                  const pts=meses.map((m2,i)=>({
+                    x:PL+(i/11)*cW,
+                    yNom:m2.gastoNominal>0?PT+cH*(1-m2.gastoNominal/maxReal):null,
+                    yReal:m2.gastoReal>0?PT+cH*(1-m2.gastoReal/maxReal):null,
+                    ...m2
+                  }));
+                  const pathNom=pts.filter(p=>p.yNom!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.yNom}`).join(" ");
+                  const pathReal=pts.filter(p=>p.yReal!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.yReal}`).join(" ");
+                  return<>
+                    <svg viewBox={`0 0 ${W} ${H}`} style={svgStyle} xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="gnR" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity="0.2"/><stop offset="100%" stopColor={C.green} stopOpacity="0"/></linearGradient>
+                        <linearGradient id="gnN" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.red} stopOpacity="0.15"/><stop offset="100%" stopColor={C.red} stopOpacity="0"/></linearGradient>
+                      </defs>
+                      {[0,0.25,0.5,0.75,1].map((f,i)=>{
+                        const v=Math.round(maxReal*f);
+                        const y=PT+cH*(1-f);
+                        return<g key={i}>
+                          <line x1={PL} y1={y} x2={W-PR} y2={y} stroke={C.bd} strokeWidth="0.5"/>
+                          <text x={PL-5} y={y+4} textAnchor="end" fill={C.t3} fontSize="9" fontFamily="sans-serif">{v>=1000?Math.round(v/1000)+"K":v}</text>
+                        </g>;
+                      })}
+                      {pathNom&&<><path d={`M${pts.filter(p=>p.yNom)[0]?.x},${PT+cH} ${pts.filter(p=>p.yNom).map(p=>`L${p.x},${p.yNom}`).join(" ")} L${pts.filter(p=>p.yNom).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#gnN)"/><path d={pathNom} fill="none" stroke={C.red} strokeWidth="2" strokeLinejoin="round" strokeDasharray="5,3"/></>}
+                      {pathReal&&<><path d={`M${pts.filter(p=>p.yReal)[0]?.x},${PT+cH} ${pts.filter(p=>p.yReal).map(p=>`L${p.x},${p.yReal}`).join(" ")} L${pts.filter(p=>p.yReal).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#gnR)"/><path d={pathReal} fill="none" stroke={C.green} strokeWidth="2.5" strokeLinejoin="round"/></>}
+                      {pts.map((p,i)=><g key={i}>
+                        {p.yNom&&<circle cx={p.x} cy={p.yNom} r="3" fill={C.red}/>}
+                        {p.yReal&&<circle cx={p.x} cy={p.yReal} r="3.5" fill={C.green}/>}
+                        {p.ipcMes&&<text x={p.x} y={PT-8} textAnchor="middle" fill={C.amber} fontSize="8" fontFamily="sans-serif">{p.ipcMes}%</text>}
+                        <text x={p.x} y={H-6} textAnchor="middle" fill={i===selMonth?C.blue:C.t3} fontSize="9" fontFamily="sans-serif" fontWeight={i===selMonth?"700":"400"}>{MONTHS[i]}</text>
+                      </g>)}
+                    </svg>
+                    <div style={{display:"flex",gap:16,fontSize:11,color:C.t2,marginTop:4,flexWrap:"wrap"}}>
+                      <span><span style={{display:"inline-block",width:16,height:2,background:C.red,borderRadius:2,marginRight:5,verticalAlign:"middle",opacity:0.7}}/>Gasto nominal</span>
+                      <span><span style={{display:"inline-block",width:16,height:2,background:C.green,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Gasto en pesos de hoy</span>
+                      <span style={{color:C.amber}}><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.amber,marginRight:5,verticalAlign:"middle"}}/>IPC del mes (sobre el gráfico)</span>
+                    </div>
+                  </>;
+                })()}
+              </Card>
+
+              {/* ── Gráfico 2: sueldo vs gasto real ── */}
+              <Card title="Ingreso real vs Gasto real" subtitle="Ambos ajustados por inflación — muestra si tu poder adquisitivo sube o baja">
+                {(()=>{
+                  const maxIG=Math.max(...meses.map(x=>Math.max(x.ingresoReal,x.gastoReal)),1);
+                  const ptsI=meses.map((m2,i)=>({x:PL+(i/11)*cW, y:m2.ingresoReal>0?PT+cH*(1-m2.ingresoReal/maxIG):null}));
+                  const ptsG=meses.map((m2,i)=>({x:PL+(i/11)*cW, y:m2.gastoReal>0?PT+cH*(1-m2.gastoReal/maxIG):null}));
+                  const pI=ptsI.filter(p=>p.y!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  const pG=ptsG.filter(p=>p.y!==null).map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
+                  if(!pI&&!pG) return<div style={{fontSize:12,color:C.t3,padding:"20px 0",textAlign:"center"}}>Sin datos de ingresos o gastos para este año.</div>;
+                  return<>
+                    <svg viewBox={`0 0 ${W} ${H}`} style={svgStyle} xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <linearGradient id="giR" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.green} stopOpacity="0.25"/><stop offset="100%" stopColor={C.green} stopOpacity="0"/></linearGradient>
+                        <linearGradient id="ggR" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.red} stopOpacity="0.18"/><stop offset="100%" stopColor={C.red} stopOpacity="0"/></linearGradient>
+                      </defs>
+                      {[0,0.25,0.5,0.75,1].map((f,i)=>{
+                        const v=Math.round(maxIG*f);
+                        const y=PT+cH*(1-f);
+                        return<g key={i}>
+                          <line x1={PL} y1={y} x2={W-PR} y2={y} stroke={C.bd} strokeWidth="0.5"/>
+                          <text x={PL-5} y={y+4} textAnchor="end" fill={C.t3} fontSize="9" fontFamily="sans-serif">{v>=1000?Math.round(v/1000)+"K":v}</text>
+                        </g>;
+                      })}
+                      {pG&&<><path d={`M${ptsG.filter(p=>p.y)[0]?.x},${PT+cH} ${ptsG.filter(p=>p.y).map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsG.filter(p=>p.y).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#ggR)"/><path d={pG} fill="none" stroke={C.red} strokeWidth="2" strokeLinejoin="round"/></>}
+                      {pI&&<><path d={`M${ptsI.filter(p=>p.y)[0]?.x},${PT+cH} ${ptsI.filter(p=>p.y).map(p=>`L${p.x},${p.y}`).join(" ")} L${ptsI.filter(p=>p.y).slice(-1)[0]?.x},${PT+cH} Z`} fill="url(#giR)"/><path d={pI} fill="none" stroke={C.green} strokeWidth="2.5" strokeLinejoin="round"/></>}
+                      {meses.map((m2,i)=>{
+                        const px=PL+(i/11)*cW;
+                        const isExc=m2.gastoReal>m2.ingresoReal&&m2.ingresoReal>0;
+                        return<g key={i}>
+                          {ptsI[i].y&&<circle cx={px} cy={ptsI[i].y} r="3.5" fill={C.green}/>}
+                          {ptsG[i].y&&<circle cx={px} cy={ptsG[i].y} r="3" fill={isExc?C.red:C.red} opacity={isExc?1:0.6}/>}
+                          {isExc&&<text x={px} y={PT-8} textAnchor="middle" fill={C.red} fontSize="9" fontFamily="sans-serif">⚠</text>}
+                          <text x={px} y={H-6} textAnchor="middle" fill={i===selMonth?C.blue:C.t3} fontSize="9" fontFamily="sans-serif" fontWeight={i===selMonth?"700":"400"}>{MONTHS[i]}</text>
+                        </g>;
+                      })}
+                    </svg>
+                    <div style={{display:"flex",gap:16,fontSize:11,color:C.t2,marginTop:4}}>
+                      <span><span style={{display:"inline-block",width:14,height:2,background:C.green,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Ingreso real</span>
+                      <span><span style={{display:"inline-block",width:14,height:2,background:C.red,borderRadius:2,marginRight:5,verticalAlign:"middle"}}/>Gasto real</span>
+                      <span style={{color:C.red}}>⚠ = gastos superan ingresos en pesos constantes</span>
+                    </div>
+                  </>;
+                })()}
+              </Card>
+
+              {/* ── Tabla: inflación real por categoría ── */}
+              <Card title={`Inflación real de tus gastos por categoría — ${MONTHS[selMonth]} ${selYear} vs ${MONTHS[prevM]} ${prevY}`} subtitle="Variación nominal de tus gastos menos el IPC del mes = inflación real propia">
+                {inflPropia.length===0?<div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"20px 0"}}>No hay datos para comparar con el mes anterior.</div>:(
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead>
+                      <tr style={{borderBottom:`1px solid ${C.bd}`}}>
+                        {["Categoría","Gasto anterior","Gasto actual","Var. nominal","IPC mes","Inflación real"].map((h,i)=>(
+                          <th key={i} style={{padding:"7px 10px",textAlign:i>=1?"right":"left",fontSize:10,fontWeight:400,color:C.t3,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inflPropia.sort((a,b)=>(b.varNom||0)-(a.varNom||0)).map(c=>{
+                        const ipc=ipcMap[hoyClave];
+                        const color=c.varReal===null?"#888":c.varReal>5?C.red:c.varReal>0?C.amber:C.green;
+                        return<tr key={c.id} style={{borderBottom:`1px solid ${C.bd}`}}>
+                          <td style={{padding:"8px 10px"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <div style={{width:22,height:22,borderRadius:6,background:c.color+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic id={c.icon} size={11} color={c.color}/></div>
+                              <span style={{color:C.t,fontSize:12}}>{c.label}</span>
+                            </div>
+                          </td>
+                          <td style={{padding:"8px 10px",textAlign:"right",color:C.t3}}>{c.prev>0?fmt(c.prev,"ARS",tc):"—"}</td>
+                          <td style={{padding:"8px 10px",textAlign:"right",color:C.t,fontWeight:500}}>{c.act>0?fmt(c.act,"ARS",tc):"—"}</td>
+                          <td style={{padding:"8px 10px",textAlign:"right",fontWeight:600,color:c.varNom===null?C.t3:c.varNom>0?C.red:C.green}}>{c.varNom===null?"—":(c.varNom>0?"+":"")+c.varNom.toFixed(1)+"%"}</td>
+                          <td style={{padding:"8px 10px",textAlign:"right",color:C.amber}}>{ipc!=null?`${ipc}%`:"—"}</td>
+                          <td style={{padding:"8px 10px",textAlign:"right"}}>
+                            <span style={{background:color+"22",color,fontWeight:600,fontSize:11,padding:"2px 8px",borderRadius:12}}>
+                              {c.varReal===null?"—":(c.varReal>0?"+":"")+c.varReal.toFixed(1)+"%"}
+                            </span>
+                          </td>
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                )}
+                <div style={{marginTop:12,fontSize:11,color:C.t3,lineHeight:1.7,background:C.bg4,borderRadius:8,padding:"10px 12px"}}>
+                  <b style={{color:C.t2}}>¿Cómo leer esto?</b> Si tu gasto en Alimentación subió 30% y la inflación del mes fue 8%, tu inflación real en ese rubro es +22%: gastás más de lo que justifica la inflación. En cambio, si subió 5%, tu gasto real <i>bajó</i> −3%, lo que significa que ajustaste ese rubro.
+                </div>
+              </Card>
+
+              {/* ── Tabla IPC mensual ── */}
+              {inflData&&<Card title={`IPC mensual — ${selYear}`} subtitle="Fuente: INDEC via argentinadatos.com">
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {MONTHS.map((mn,m)=>{
+                    const clave=`${selYear}-${String(m+1).padStart(2,"0")}`;
+                    const ipc=ipcMap[clave];
+                    const color=ipc===undefined?C.t3:ipc>10?C.red:ipc>5?C.amber:C.green;
+                    return<div key={m} style={{flex:"1 1 60px",background:C.bg4,borderRadius:8,padding:"10px 8px",textAlign:"center",border:`1px solid ${ipc!==undefined?color+"33":C.bd}`}}>
+                      <div style={{fontSize:10,color:C.t3,marginBottom:4}}>{mn}</div>
+                      <div style={{fontSize:16,fontWeight:600,color}}>{ipc!==undefined?`${ipc}%`:"—"}</div>
+                    </div>;
+                  })}
+                </div>
+              </Card>}
+            </>}
+          </>;
+        })()}
+
         {/* AYUDA */}
         {tab==="ayuda"&&<>
           <div style={{marginBottom:20}}>
@@ -1969,6 +2292,28 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           <div style={{marginTop:6,color:C.t3,fontSize:11}}>Powered by Gemini 2.0 Flash via OpenRouter · Datos del período actual</div>
         </div>}
       </Modal>}
+
+      {/* MODAL EDITAR GASTO */}
+      {editGastoModal&&editGastoDraft&&(()=>{
+        const catForEdit=cats.find(c=>c.id===editGastoDraft.cat)||cats[0];
+        return<Modal title="Editar gasto" onClose={()=>{setEditGastoModal(false);setEditGastoDraft(null);}}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Monto ($)</div><input style={{...inp,fontSize:18,fontWeight:600,color:C.t}} type="number" placeholder="0" value={editGastoDraft.monto} onChange={e=>setEditGastoDraft(d=>({...d,monto:e.target.value}))}/></div>
+              <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Categoría</div><select style={sel} value={editGastoDraft.cat} onChange={e=>{const c=cats.find(x=>x.id===e.target.value);setEditGastoDraft(d=>({...d,cat:e.target.value,sub:c?.items[0]?.id||""}));}}>{cats.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></div>
+              <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Subcategoría</div><select style={sel} value={editGastoDraft.sub} onChange={e=>setEditGastoDraft(d=>({...d,sub:e.target.value}))}>{catForEdit?.items.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
+              <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Medio de pago</div><select style={sel} value={editGastoDraft.medio_pago||"efectivo"} onChange={e=>setEditGastoDraft(d=>({...d,medio_pago:e.target.value}))}>{MEDIOS_PAGO.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
+              <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Fecha</div><input style={inp} type="date" value={editGastoDraft.fechaISO||""} onChange={e=>setEditGastoDraft(d=>({...d,fechaISO:e.target.value}))}/></div>
+              <div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Descripción</div><input style={inp} placeholder="Opcional..." value={editGastoDraft.descripcion||""} onChange={e=>setEditGastoDraft(d=>({...d,descripcion:e.target.value}))}/></div>
+            </div>
+            {editGastoError&&<div style={{background:C.red+"18",border:`1px solid ${C.red}33`,borderRadius:8,padding:"8px 12px",fontSize:12,color:C.red}}>{editGastoError}</div>}
+            <div style={{display:"flex",gap:8}}>
+              <Btn primary onClick={saveEditGasto} disabled={editGastoLoading}>{editGastoLoading?"Guardando...":"Guardar cambios"}</Btn>
+              <Btn onClick={()=>{setEditGastoModal(false);setEditGastoDraft(null);}}>Cancelar</Btn>
+            </div>
+          </div>
+        </Modal>;
+      })()}
     </div>
   );
 }
