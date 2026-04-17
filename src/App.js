@@ -37,15 +37,17 @@ const COLORS = ["#4E9EF5","#34C88A","#F5A623","#E05C5C","#A78BFA","#F472B6","#FB
 const MONTHS = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 const now = new Date();
 
-const MEDIOS_PAGO = [
-  { id:"efectivo",   label:"Efectivo",            color:"#34C88A" },
-  { id:"visa",       label:"Visa Crédito",         color:"#1A1F71" },
-  { id:"mastercard", label:"Mastercard Crédito",   color:"#EB001B" },
-  { id:"debito",     label:"Débito",               color:"#4E9EF5" },
-  { id:"uala",       label:"Ualá",                 color:"#7B2FBE" },
-  { id:"mp_debito",  label:"MP Débito",            color:"#00B1EA" },
-  { id:"mp_credito", label:"MP Crédito",           color:"#009EE3" },
+const MEDIOS_PAGO_BASE = [
+  { id:"efectivo",      label:"Efectivo",            color:"#34C88A" },
+  { id:"transferencia", label:"Transferencia",        color:"#38BDF8" },
+  { id:"visa",          label:"Visa Crédito",         color:"#1A1F71" },
+  { id:"mastercard",    label:"Mastercard Crédito",   color:"#EB001B" },
+  { id:"debito",        label:"Débito",               color:"#4E9EF5" },
+  { id:"uala",          label:"Ualá",                 color:"#7B2FBE" },
+  { id:"mp_debito",     label:"MP Débito",            color:"#00B1EA" },
+  { id:"mp_credito",    label:"MP Crédito",           color:"#009EE3" },
 ];
+const MEDIOS_PAGO = MEDIOS_PAGO_BASE;
 
 const DEFAULT_CATS = [
   { id:"vivienda", label:"Vivienda", color:"#4E9EF5", icon:"home", items:[
@@ -395,20 +397,31 @@ function Dashboard({ session }) {
     });
   };
 
+  // ── Medios de pago custom del usuario ─────────────────────────────────────
+  const [mediosExtra,setMediosExtra]=useState([]); // [{id,label,color}] cargados de Supabase
+  const [medioModal,setMedioModal]=useState(false);
+  const [medioDraft,setMedioDraft]=useState({label:"",color:"#94A3B8"});
+  const [medioSaving,setMedioSaving]=useState(false);
+
+  // Array completo: fijos + custom. Se usa en todos los selects de la app.
+  const mediosTodos=useMemo(()=>[...MEDIOS_PAGO_BASE,...mediosExtra],[mediosExtra]);
+
   const tc=tcMode==="auto"&&tcAuto?tcAuto:tcManual;
 
   const loadData=useCallback(async()=>{
     setLoading(true);
-    const [{data:gData},{data:iData},{data:cData},{data:sData},{data:bData}]=await Promise.all([
+    const [{data:gData},{data:iData},{data:cData},{data:sData},{data:bData},{data:mData}]=await Promise.all([
       supabase.from("gastos").select("*").eq("user_id",userId),
       supabase.from("ingresos").select("*").eq("user_id",userId),
       supabase.from("categorias").select("*").eq("user_id",userId).order("sort_order"),
       supabase.from("subcategorias").select("*").eq("user_id",userId).order("sort_order"),
       supabase.from("presupuestos").select("*").eq("user_id",userId).eq("month",selMonth).eq("year",selYear),
+      supabase.from("medios_pago_custom").select("*").eq("user_id",userId).order("created_at"),
     ]);
     if(gData)setGastos(gData);
     if(iData)setIngresos(iData);
     if(bData)setBudgets(Object.fromEntries(bData.map(b=>[b.sub_id?`${b.cat_id}|${b.sub_id}`:b.cat_id,b.monto])));
+    if(mData)setMediosExtra(mData.map(m=>({id:m.id,label:m.label,color:m.color||"#94A3B8"})));
     if(cData&&cData.length>0){
       const rebuilt=cData.map(c=>({id:c.id,label:c.label,color:c.color,icon:c.icon,items:(sData||[]).filter(s=>s.cat_id===c.id).map(s=>({id:s.id,label:s.label,icon:s.icon}))}));
       setCats(rebuilt);
@@ -492,9 +505,18 @@ function Dashboard({ session }) {
 
   const byMedio=useMemo(()=>{
     const r={};
-    MEDIOS_PAGO.forEach(m=>{r[m.id]=ad.filter(x=>x.medio_pago===m.id).reduce((s,x)=>s+Number(x.monto),0);});
+    // Inicializar todos los medios conocidos en 0
+    mediosTodos.forEach(m=>{r[m.id]=0;});
+    // Sumar todos los gastos
+    ad.forEach(x=>{
+      // null, vacío, o "efectivo" → efectivo
+      const raw=x.medio_pago;
+      const mid=(!raw||raw===""||raw==="efectivo")?"efectivo":raw;
+      // Si el medio no existe en mediosTodos (dato viejo), igual lo contamos bajo su id
+      r[mid]=(r[mid]||0)+Number(x.monto);
+    });
     return r;
-  },[ad]);
+  },[ad,mediosTodos]);
 
   const mTotals=useMemo(()=>MONTHS.map((_,m)=>({
     g:gastos.filter(x=>x.year===selYear&&x.month===m).reduce((s,x)=>s+Number(x.monto),0),
@@ -691,6 +713,33 @@ function Dashboard({ session }) {
   const saveEditSub=async()=>{if(!subDraft.label.trim())return;await supabase.from("subcategorias").update({label:subDraft.label.trim(),icon:subDraft.icon}).eq("id",editSubId).eq("user_id",userId);setCats(cs=>cs.map(c=>c.id===editCatId?{...c,items:c.items.map(s=>s.id===editSubId?{...s,label:subDraft.label.trim(),icon:subDraft.icon}:s)}:c));setCatModal(null);};
   const delSub=async(catId,subId)=>{await supabase.from("subcategorias").delete().eq("id",subId).eq("user_id",userId);setCats(cs=>cs.map(c=>c.id===catId?{...c,items:c.items.filter(s=>s.id!==subId)}:c));};
 
+  // ── Medios de pago custom ─────────────────────────────────────────────────
+  const saveNewMedio=async()=>{
+    if(!medioDraft.label.trim()){return;}
+    setMedioSaving(true);
+    const id="medio-"+Date.now();
+    const newMedio={id,label:medioDraft.label.trim(),color:medioDraft.color||"#94A3B8"};
+    const {error}=await supabase.from("medios_pago_custom").insert({...newMedio,user_id:userId});
+    if(error){
+      // Si la tabla no existe todavía, igual agregamos en memoria para que funcione en la sesión
+      console.warn("medios_pago_custom error (¿tabla creada?):",error.message);
+      if(!error.message.includes("does not exist")){
+        alert("Error al guardar: "+error.message);
+        setMedioSaving(false);
+        return;
+      }
+    }
+    setMediosExtra(ms=>[...ms,newMedio]);
+    setMedioDraft({label:"",color:"#94A3B8"});
+    setMedioModal(false);
+    setMedioSaving(false);
+  };
+  const delMedio=async(id)=>{
+    if(!window.confirm("¿Eliminar este medio de pago?"))return;
+    await supabase.from("medios_pago_custom").delete().eq("id",id).eq("user_id",userId);
+    setMediosExtra(ms=>ms.filter(m=>m.id!==id));
+  };
+
   const loadBudgets=useCallback(async()=>{
     const {data:bData}=await supabase.from("presupuestos").select("*").eq("user_id",userId).eq("month",selMonth).eq("year",selYear);
     if(bData)setBudgets(Object.fromEntries(bData.map(b=>[b.sub_id?`${b.cat_id}|${b.sub_id}`:b.cat_id,b.monto])));
@@ -752,7 +801,7 @@ function Dashboard({ session }) {
       }
     });
     if(hormiga.length>0){lines.push(`\nGastos hormiga:`);hormiga.forEach(h=>lines.push(`  - ${h.subLabel}: ${h.count} txs, $${h.total.toLocaleString("es-AR")}`));}
-    const medioTop=MEDIOS_PAGO.filter(m=>byMedio[m.id]>0).sort((a,b)=>byMedio[b.id]-byMedio[a.id]);
+    const medioTop=mediosTodos.filter(m=>byMedio[m.id]>0).sort((a,b)=>byMedio[b.id]-byMedio[a.id]);
     if(medioTop.length>0){lines.push(`\nMedios de pago más usados:`);medioTop.forEach(m=>lines.push(`  - ${m.label}: $${byMedio[m.id].toLocaleString("es-AR")}`));}
     return lines.join("\n");
   };
@@ -792,28 +841,28 @@ function Dashboard({ session }) {
   const [quickError,setQuickError]=useState("");
   const [quickOk,setQuickOk]=useState(false);
 
-  const OR_KEY="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";
+  // OR_KEY removida del frontend — las llamadas a Gemini van a /api/ai (proxy seguro)
 
   // ─── AI CARGA INTELIGENTE ──────────────────────────────────────────────────
   const buildCargaPrompt=(text)=>{
     const catList=cats.map(c=>`${c.id} (${c.label}): ${c.items.map(s=>`${s.id} (${s.label})`).join(", ")}`).join("\n");
-    const mediosList=MEDIOS_PAGO.map(m=>`${m.id} (${m.label})`).join(", ");
+    const mediosList=mediosTodos.map(m=>`${m.id} (${m.label})`).join(", ");
     return `Sos un asistente de finanzas personales para Argentina. El usuario describe un gasto y vos lo clasificás automáticamente.\n\nCategorías disponibles:\n${catList}\n\nMedios de pago disponibles: ${mediosList}\n\nTexto del usuario: "${text}"\n\nRespondé SOLO con JSON válido, sin markdown ni texto extra:\n{"monto":0,"descripcion":"","cat":"","cat_label":"","sub":"","sub_label":"","medio_pago":"efectivo","medio_label":"","confianza":0.9,"nota":""}`;
   };
 
   const buildBulkPrompt=(text)=>{
     const catList=cats.map(c=>`${c.id} (${c.label}): ${c.items.map(s=>`${s.id} (${s.label})`).join(", ")}`).join("\n");
-    return `Sos un asistente de finanzas personales para Argentina. Interpretá cada línea como un gasto separado.\n\nCategorías disponibles:\n${catList}\nMedios de pago disponibles: ${MEDIOS_PAGO.map(m=>`${m.id} (${m.label})`).join(", ")}\n\nLista de gastos (una por línea):\n${text}\n\nRespondé SOLO con JSON array válido (sin markdown ni texto extra):\n[{"monto":0,"descripcion":"","cat":"","cat_label":"","sub":"","sub_label":"","medio_pago":"efectivo","medio_label":"","confianza":0.9}]`;
+    return `Sos un asistente de finanzas personales para Argentina. Interpretá cada línea como un gasto separado.\n\nCategorías disponibles:\n${catList}\nMedios de pago disponibles: ${mediosTodos.map(m=>`${m.id} (${m.label})`).join(", ")}\n\nLista de gastos (una por línea):\n${text}\n\nRespondé SOLO con JSON array válido (sin markdown ni texto extra):\n[{"monto":0,"descripcion":"","cat":"","cat_label":"","sub":"","sub_label":"","medio_pago":"efectivo","medio_label":"","confianza":0.9}]`;
   };
 
   const buildImagePrompt=()=>{
     const catList=cats.map(c=>`${c.id} (${c.label}): ${c.items.map(s=>`${s.id} (${s.label})`).join(", ")}`).join("\n");
-    return `Analizá este ticket, factura o imagen de gasto. Si hay múltiples ítems o rubros claramente distintos (ej: supermercado con carnes, lácteos, limpieza), separá cada uno en un objeto distinto. Si es un gasto único o no se puede separar con claridad, devolvé un array de un solo elemento.\n\nCategorías disponibles:\n${catList}\nMedios de pago disponibles: ${MEDIOS_PAGO.map(m=>`${m.id} (${m.label})`).join(", ")}\n\nRespondé SOLO con JSON array válido (sin markdown ni texto extra), un objeto por gasto:\n[{"monto":0,"descripcion":"","cat":"","cat_label":"","sub":"","sub_label":"","medio_pago":"efectivo","medio_label":"","confianza":0.9,"comercio":"","nota":""}]`;
+    return `Analizá este ticket, factura o imagen de gasto. Si hay múltiples ítems o rubros claramente distintos (ej: supermercado con carnes, lácteos, limpieza), separá cada uno en un objeto distinto. Si es un gasto único o no se puede separar con claridad, devolvé un array de un solo elemento.\n\nCategorías disponibles:\n${catList}\nMedios de pago disponibles: ${mediosTodos.map(m=>`${m.id} (${m.label})`).join(", ")}\n\nRespondé SOLO con JSON array válido (sin markdown ni texto extra), un objeto por gasto:\n[{"monto":0,"descripcion":"","cat":"","cat_label":"","sub":"","sub_label":"","medio_pago":"efectivo","medio_label":"","confianza":0.9,"comercio":"","nota":""}]`;
   };
 
   const buildExcelPrompt=(rows)=>{
     const catList=cats.map(c=>`${c.id} (${c.label}): ${c.items.map(s=>`${s.id} (${s.label})`).join(", ")}`).join("\n");
-    const mediosList=MEDIOS_PAGO.map(m=>`${m.id} (${m.label})`).join(", ");
+    const mediosList=mediosTodos.map(m=>`${m.id} (${m.label})`).join(", ");
     const rowsText=rows.map((r,i)=>`Fila ${i+1}: ${Object.entries(r).map(([k,v])=>`${k}=${v}`).join(" | ")}`).join("\n");
     return `Sos un asistente de finanzas personales para Argentina. Analizá estas filas de una planilla de gastos y clasificá cada una.\n\nIMPORTANTE sobre fechas: Intentá detectar la columna de fecha (puede llamarse "fecha", "date", "día", "Fecha", etc.) y preservá el valor exacto. Si la fecha está en formato Excel numérico (ej: 45678), convertila a DD/MM/AAAA. Si no hay fecha, usá null.\n\nCategorías disponibles:\n${catList}\n\nMedios de pago disponibles: ${mediosList}\n\nFilas de la planilla:\n${rowsText}\n\nRespondé SOLO con JSON array válido (sin markdown ni texto extra), una fila = un objeto:\n[{"monto":0,"descripcion":"","cat":"","cat_label":"","sub":"","sub_label":"","medio_pago":"efectivo","medio_label":"","fecha":"DD/MM/AAAA","confianza":0.9}]`;
   };
@@ -871,11 +920,12 @@ function Dashboard({ session }) {
     setAiCargaLoading(false);
   };
 
+  // ✅ Proxy seguro: OR_KEY vive en el servidor (api/ai.js), nunca en el frontend
   const callGeminiCarga=async(messages)=>{
-    const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+    const r=await fetch("/api/ai",{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://finanzasapp.com","X-Title":"FinanzasApp"},
-      body:JSON.stringify({model:"google/gemini-2.0-flash-001",messages,max_tokens:2000,temperature:0.1})
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({messages,max_tokens:2000,temperature:0.1})
     });
     const j=await r.json();
     if(j.error)throw new Error(j.error.message);
@@ -944,10 +994,10 @@ function Dashboard({ session }) {
 
   const confirmarTodosGastosIA=async(items)=>{
     setAiCargaLoading(true);
-    for(const item of items){
+    // ✅ FIX: insert de array único — si falla, ningún registro queda guardado a medias
+    const rows=items.map(item=>{
       const cat=cats.find(c=>c.id===item.cat)||cats[0];
       const sub=cat?.items.find(s=>s.id===item.sub)||cat?.items[0];
-      // Usar fecha del item si viene del Excel, sino fecha de hoy
       let fechaFmt=new Date(todayISO()+"T12:00:00").toLocaleDateString("es-AR");
       let fYear=new Date().getFullYear(), fMonth=new Date().getMonth();
       if(item.fecha&&item.fecha!=="null"&&item.fecha.includes("/")){
@@ -961,10 +1011,15 @@ function Dashboard({ session }) {
           }
         }
       }
-      const row={user_id:userId,year:fYear,month:fMonth,cat:cat?.id,sub:sub?.id,monto:parseFloat(item.monto),descripcion:item.descripcion||null,medio_pago:item.medio_pago||"efectivo",fecha:fechaFmt,tc_at_time:tc,cat_label:cat?.label,sub_label:sub?.label,sub_icon:sub?.icon,cat_color:cat?.color,cat_icon:cat?.icon};
-      const {data}=await supabase.from("gastos").insert(row).select().single();
-      if(data)setGastos(gs=>[...gs,data]);
+      return{user_id:userId,year:fYear,month:fMonth,cat:cat?.id,sub:sub?.id,monto:parseFloat(item.monto),descripcion:item.descripcion||null,medio_pago:item.medio_pago||"efectivo",fecha:fechaFmt,tc_at_time:tc,cat_label:cat?.label,sub_label:sub?.label,sub_icon:sub?.icon,cat_color:cat?.color,cat_icon:cat?.icon};
+    });
+    const {data:saved,error}=await supabase.from("gastos").insert(rows).select();
+    if(error){
+      alert(`Error al guardar: ${error.message}\n\nNingún gasto fue guardado. Intentá de nuevo.`);
+      setAiCargaLoading(false);
+      return;
     }
+    if(saved)setGastos(gs=>[...gs,...saved]);
     setAiCargaLoading(false);
     setAiCargaModal(false);setAiCargaResult(null);setAiCargaBulk("");setAiCargaExcelName("");setAiCargaExcelPreview([]);
     saveTcHistory(tc);
@@ -1077,10 +1132,10 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
 4. No incluyas CHART_JSON si no hay datos suficientes para graficarlo.`;
 
     try{
-      const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+      const r=await fetch("/api/ai",{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://finanzasapp.com","X-Title":"FinanzasApp"},
-        body:JSON.stringify({model:"google/gemini-2.0-flash-001",messages:[{role:"user",content:prompt}],max_tokens:1200,temperature:0.7})
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({messages:[{role:"user",content:prompt}],max_tokens:1200,temperature:0.7})
       });
       const j=await r.json();
       if(j.error){setAiResponse("Error de API: "+j.error.message);setAiLoading(false);return;}
@@ -1123,10 +1178,10 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
     if(!q.trim())return;
     setAyudaLoading(true);setAyudaResp("");
     try{
-      const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+      const r=await fetch("/api/ai",{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${OR_KEY}`,"HTTP-Referer":"https://finanzasapp.com","X-Title":"FinanzasApp"},
-        body:JSON.stringify({model:"google/gemini-2.0-flash-001",messages:[{role:"user",content:`Sos el asistente de soporte de FinanzasApp, una app de gestión de gastos personales para Argentina. Respondé en español, de forma clara y amigable, en máximo 150 palabras. Pregunta del usuario: ${q}`}],max_tokens:400,temperature:0.5})
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({messages:[{role:"user",content:`Sos el asistente de soporte de FinanzasApp, una app de gestión de gastos personales para Argentina. Respondé en español, de forma clara y amigable, en máximo 150 palabras. Pregunta del usuario: ${q}`}],max_tokens:400,temperature:0.5})
       });
       const j=await r.json();
       setAyudaResp(j.choices?.[0]?.message?.content||"No pude responder, intentá de nuevo.");
@@ -1283,6 +1338,68 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             <MCard label="Balance" value={fmt(bal,currency,tc)} color={bal>=0?C.green:C.red} icon="dollar" sub={bal>=0?"Superávit":"Déficit"}/>
             <MCard label="Tasa ahorro" value={`${savRate}%`} color={savRate>=20?C.green:savRate>=0?C.blue:C.red} icon="archive" sub={savRate>=20?"Muy bien 👏":savRate>=0?"Aceptable":"Atención ⚠️"}/>
           </div>
+          {/* ✅ NUEVO: mini-gráfico nominal vs real — aparece si hay datos de inflación */}
+          {inflData&&viewMode==="year"&&(()=>{
+            const ipcMap2={};
+            inflData.forEach(x=>{const k=x.fecha.slice(0,7);ipcMap2[k]=x.valor;});
+            const hoyClave2=`${selYear}-${String(selMonth+1).padStart(2,"0")}`;
+            const mesesDash=MONTHS.map((_,m)=>{
+              const clave=`${selYear}-${String(m+1).padStart(2,"0")}`;
+              const gNom=gastos.filter(g=>g.year===selYear&&g.month===m).reduce((s,x)=>s+Number(x.monto),0);
+              let factor=1;
+              if(inflData){const sorted=[...inflData].sort((a,b)=>a.fecha>b.fecha?1:-1);for(const d of sorted){const ym=d.fecha.slice(0,7);if(ym>clave&&ym<=hoyClave2)factor*=(1+d.valor/100);}}
+              return{m,gNom,gReal:gNom*factor,ipc:ipcMap2[clave]||null};
+            }).filter(x=>x.gNom>0);
+            if(mesesDash.length===0)return null;
+            // ── Barras agrupadas: funciona con 1, 2 o 12 meses ──────────────────
+            const W=560,PL=50,PR=12,PT=24,PB=28,cW=W-PL-PR,cH=100,H=PT+cH+PB;
+            const maxV=Math.max(...mesesDash.map(x=>Math.max(x.gNom,x.gReal)),1);
+            const toY=v=>PT+cH*(1-(v/maxV));
+            const slotW=cW/mesesDash.length;
+            const gap=Math.max(2,slotW*0.08);
+            const bW=Math.max(8,Math.min(30,(slotW-gap*3)/2));
+            return<div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.bd}`,borderRadius:14,padding:"16px 20px",marginBottom:16,boxShadow:"0 4px 20px rgba(0,0,0,0.2)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.t}}>Gastos nominales vs pesos de hoy · {selYear}</div>
+                <button onClick={()=>setTab("inflación")} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:6,padding:"3px 8px",cursor:"pointer",color:C.green,fontSize:10}}>Ver análisis completo →</button>
+              </div>
+              <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxHeight:160,display:"block"}} xmlns="http://www.w3.org/2000/svg">
+                {[0,0.5,1].map((f,i)=>{const v=Math.round(maxV*f);const y=PT+cH*(1-f);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke={C.bd} strokeWidth="0.5"/><text x={PL-4} y={y+4} textAnchor="end" fill={C.t3} fontSize="8" fontFamily="sans-serif">{v>=1000?Math.round(v/1000)+"K":v}</text></g>;})}
+                {mesesDash.map((d,i)=>{
+                  const slotX=PL+i*slotW;
+                  const cx=slotX+slotW/2;
+                  const xNom=cx-bW-gap/2;
+                  const xReal=cx+gap/2;
+                  const hNom=Math.max(2,(d.gNom/maxV)*cH);
+                  const hReal=Math.max(2,(d.gReal/maxV)*cH);
+                  const pct=d.gNom>0?Math.round(((d.gReal-d.gNom)/d.gNom)*100):0;
+                  const isActive=d.m===selMonth;
+                  return<g key={i}>
+                    {/* Barra nominal */}
+                    <rect x={xNom} y={toY(d.gNom)} width={bW} height={hNom} fill={C.red} rx="2" opacity={isActive?1:0.65}/>
+                    {/* Barra real ajustada */}
+                    <rect x={xReal} y={toY(d.gReal)} width={bW} height={hReal} fill={C.green} rx="2" opacity={isActive?1:0.65}/>
+                    {/* IPC del mes arriba */}
+                    {d.ipc&&<text x={cx} y={PT-6} textAnchor="middle" fill={C.amber} fontSize="7" fontFamily="sans-serif">{d.ipc}%</text>}
+                    {/* Diferencia % entre nominal y real */}
+                    {Math.abs(pct)>0&&<text x={cx} y={Math.min(toY(d.gReal),toY(d.gNom))-3} textAnchor="middle" fill={pct>0?C.amber:C.green} fontSize="7" fontFamily="sans-serif">{pct>0?"+":""}{pct}%</text>}
+                    {/* Label mes */}
+                    <text x={cx} y={H-4} textAnchor="middle" fill={isActive?C.blue:C.t3} fontSize="8" fontFamily="sans-serif" fontWeight={isActive?"700":"400"}>{MONTHS[d.m]}</text>
+                  </g>;
+                })}
+              </svg>
+              <div style={{display:"flex",gap:14,fontSize:10,color:C.t2,marginTop:4,flexWrap:"wrap"}}>
+                <span><span style={{display:"inline-block",width:10,height:10,background:C.red,borderRadius:2,marginRight:4,verticalAlign:"middle",opacity:0.8}}/>Nominal</span>
+                <span><span style={{display:"inline-block",width:10,height:10,background:C.green,borderRadius:2,marginRight:4,verticalAlign:"middle"}}/>Pesos de hoy (ajustado IPC)</span>
+                <span style={{color:C.amber}}><span style={{display:"inline-block",width:7,height:7,background:C.amber,borderRadius:2,marginRight:4,verticalAlign:"middle"}}/>IPC mes · % = diferencia real vs nominal</span>
+              </div>
+            </div>;
+          })()}
+          {/* Si no hay inflData cargada todavía, mostrar botón para activar */}
+          {!inflData&&viewMode==="year"&&<div style={{background:C.bg2,border:`1px solid ${C.bd}`,borderRadius:12,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+            <span style={{fontSize:12,color:C.t3}}>📈 Activá el gráfico de <b style={{color:C.t2}}>gastos vs inflación</b> para este año</span>
+            <button onClick={()=>{fetchInflacion();}} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:7,padding:"5px 12px",cursor:"pointer",color:C.green,fontSize:12}}>{inflLoading?"Cargando...":"Cargar IPC"}</button>
+          </div>}
           <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:16}}>
             {/* Donut distribución */}
             <div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.bd}`,borderRadius:14,padding:"20px 22px",display:"flex",gap:20,alignItems:"center",flex:"2 1 300px",boxShadow:"0 4px 20px rgba(0,0,0,0.2)"}}>
@@ -1302,7 +1419,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             {/* Medios de pago */}
             <div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.bd}`,borderRadius:14,padding:"20px 22px",flex:"1 1 220px",boxShadow:"0 4px 20px rgba(0,0,0,0.2)"}}>
               <div style={{fontSize:10,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Medios de pago</div>
-              {MEDIOS_PAGO.filter(m=>byMedio[m.id]>0).sort((a,b)=>byMedio[b.id]-byMedio[a.id]).map(m=>{
+              {mediosTodos.filter(m=>byMedio[m.id]>0).sort((a,b)=>byMedio[b.id]-byMedio[a.id]).map(m=>{
                 const pct=totG>0?Math.round((byMedio[m.id]/totG)*100):0;
                 return<div key={m.id} style={{marginBottom:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:5,alignItems:"center"}}>
@@ -1317,7 +1434,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                   </div>
                 </div>;
               })}
-              {MEDIOS_PAGO.every(m=>!byMedio[m.id])&&<div style={{fontSize:12,color:C.t3}}>Sin datos</div>}
+              {mediosTodos.every(m=>!byMedio[m.id])&&<div style={{fontSize:12,color:C.t3}}>Sin datos</div>}
             </div>
           </div>
           {viewMode==="year"&&<div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.bd}`,borderRadius:14,padding:"20px 22px",marginBottom:16,boxShadow:"0 4px 20px rgba(0,0,0,0.2)"}}>
@@ -1401,7 +1518,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                 <div style={{flex:1,minWidth:140}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Categoría</div><select style={sel} value={form.cat} onChange={e=>{const c=cats.find(x=>x.id===e.target.value);setForm(f=>({...f,cat:e.target.value,sub:c?.items[0]?.id||""}));}}>{cats.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></div>
                 <div style={{flex:1,minWidth:140}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Subcategoría</div><select style={sel} value={form.sub} onChange={e=>setForm(f=>({...f,sub:e.target.value}))}>{catForForm?.items.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
                 <div style={{flex:1,minWidth:100}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Monto ($)</div><input style={inp} type="number" placeholder="0" value={form.monto} onChange={e=>setForm(f=>({...f,monto:e.target.value}))}/></div>
-                <div style={{flex:1,minWidth:160}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Medio de pago</div><select style={sel} value={form.medio_pago} onChange={e=>setForm(f=>({...f,medio_pago:e.target.value}))}>{MEDIOS_PAGO.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
+                <div style={{flex:1,minWidth:160}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Medio de pago</div><select style={sel} value={form.medio_pago} onChange={e=>setForm(f=>({...f,medio_pago:e.target.value}))}>{mediosTodos.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
                 <div style={{flex:2,minWidth:160}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Descripción</div><input style={inp} placeholder="Opcional..." value={form.desc} onChange={e=>setForm(f=>({...f,desc:e.target.value}))}/></div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
@@ -1422,7 +1539,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead><tr style={{borderBottom:`1px solid ${C.bd}`}}>{["Subcategoría","Medio de pago",viewMode==="year"?"Mes":"Descripción","Fecha","Monto",""].map((h,i)=><th key={i} style={{padding:"8px 16px",textAlign:i>=4?"right":"left",fontSize:11,fontWeight:400,color:C.t3,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>)}</tr></thead>
                 <tbody>{items.map(g=>{
-                  const mp=MEDIOS_PAGO.find(m=>m.id===g.medio_pago);
+                  const mp=mediosTodos.find(m=>m.id===(g.medio_pago||"efectivo"))||mediosTodos[0];
                   return<tr key={g.id} style={{borderBottom:`1px solid ${C.bd}`}}>
                     <td style={{padding:"9px 16px"}}><Pill color={cat.color} icon={g.sub_icon} label={g.sub_label||g.sub}/></td>
                     <td style={{padding:"9px 16px"}}>{mp?<Pill color={mp.color} label={mp.label}/>:<span style={{color:C.t3,fontSize:12}}>—</span>}</td>
@@ -1513,14 +1630,14 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
               <thead><tr style={{borderBottom:`1px solid ${C.bd}`}}>{["Medio de pago","Total","% del total"].map((h,i)=><th key={i} style={{padding:"8px 16px",textAlign:i>=1?"right":"left",fontSize:11,fontWeight:400,color:C.t3,textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>)}</tr></thead>
               <tbody>
-                {MEDIOS_PAGO.filter(m=>byMedio[m.id]>0).sort((a,b)=>byMedio[b.id]-byMedio[a.id]).map(m=>(
+                {mediosTodos.filter(m=>byMedio[m.id]>0).sort((a,b)=>byMedio[b.id]-byMedio[a.id]).map(m=>(
                   <tr key={m.id} style={{borderBottom:`1px solid ${C.bd}`}}>
                     <td style={{padding:"9px 16px"}}><Pill color={m.color} label={m.label}/></td>
                     <td style={{padding:"9px 16px",textAlign:"right",fontWeight:500}}>-{fmt(byMedio[m.id],currency,tc)}</td>
                     <td style={{padding:"9px 16px",textAlign:"right",color:C.t2}}>{Math.round((byMedio[m.id]/(totG||1))*100)}%</td>
                   </tr>
                 ))}
-                {MEDIOS_PAGO.every(m=>!byMedio[m.id])&&<tr><td colSpan={3} style={{padding:"12px 16px",color:C.t3}}>Sin datos</td></tr>}
+                {mediosTodos.every(m=>!byMedio[m.id])&&<tr><td colSpan={3} style={{padding:"12px 16px",color:C.t3}}>Sin datos</td></tr>}
               </tbody>
             </table>
           </div>
@@ -1558,6 +1675,33 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               </div>
             </div>
           ))}
+          {/* ── MEDIOS DE PAGO ─────────────────────────────────────────────────── */}
+          <div style={{marginTop:28}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:500}}>Medios de pago</div>
+                <div style={{fontSize:11,color:C.t3,marginTop:2}}>Los fijos no se pueden eliminar. Podés agregar los tuyos.</div>
+              </div>
+              <button onClick={()=>{setMedioDraft({label:"",color:"#94A3B8"});setMedioModal(true);}} style={{background:"#4E9EF5",color:"#fff",border:"none",borderRadius:7,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:500}}>+ Agregar medio</button>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+              {MEDIOS_PAGO_BASE.map(m=>(
+                <div key={m.id} style={{display:"flex",alignItems:"center",gap:8,background:C.bg2,border:`1px solid ${m.color}33`,borderRadius:9,padding:"8px 14px"}}>
+                  <span style={{width:10,height:10,borderRadius:"50%",background:m.color,display:"inline-block",flexShrink:0}}/>
+                  <span style={{fontSize:12,color:C.t}}>{m.label}</span>
+                  <span style={{fontSize:10,color:C.t3,background:C.bg4,borderRadius:4,padding:"1px 6px"}}>fijo</span>
+                </div>
+              ))}
+              {mediosExtra.map(m=>(
+                <div key={m.id} style={{display:"flex",alignItems:"center",gap:8,background:C.bg2,border:`1px solid ${m.color}44`,borderRadius:9,padding:"8px 14px"}}>
+                  <span style={{width:10,height:10,borderRadius:"50%",background:m.color,display:"inline-block",flexShrink:0}}/>
+                  <span style={{fontSize:12,color:C.t}}>{m.label}</span>
+                  <span style={{fontSize:10,color:C.t3,background:C.bg4,borderRadius:4,padding:"1px 6px"}}>custom</span>
+                  <button onClick={()=>delMedio(m.id)} title="Eliminar" style={{background:"none",border:"none",cursor:"pointer",color:C.t3,fontSize:15,lineHeight:1,padding:"0 2px"}}>×</button>
+                </div>
+              ))}
+            </div>
+          </div>
         </>}
 
         {/* PRESUPUESTO */}
@@ -1674,7 +1818,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           const balMax=Math.max(...mTotals.map(x=>Math.abs(x.i-x.g)),1);
 
           // 5. Medios de pago — donut
-          const medioData=MEDIOS_PAGO.map(m=>({...m,val:byMedio[m.id]||0})).filter(m=>m.val>0).sort((a,b)=>b.val-a.val);
+          const medioData=mediosTodos.map(m=>({...m,val:byMedio[m.id]||0})).filter(m=>m.val>0).sort((a,b)=>b.val-a.val);
 
           // 6. Ahorro acumulado año
           let cumAhorro=0;
@@ -2694,6 +2838,29 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
       {catModal==="new-sub"&&<Modal title={`Nueva subcategoría en "${cats.find(c=>c.id===editCatId)?.label}"`} onClose={()=>setCatModal(null)}><div style={{display:"flex",flexDirection:"column",gap:16}}><div><div style={{fontSize:11,color:C.t2,marginBottom:6}}>Nombre</div><input style={inp} placeholder="Ej: Uber" value={subDraft.label} onChange={e=>setSubDraft(d=>({...d,label:e.target.value}))}/></div><IconPicker value={subDraft.icon} onChange={ic=>setSubDraft(d=>({...d,icon:ic}))}/><div style={{display:"flex",gap:8}}><Btn primary onClick={saveNewSub}>Crear</Btn><Btn onClick={()=>setCatModal(null)}>Cancelar</Btn></div></div></Modal>}
       {catModal==="edit-sub"&&<Modal title="Editar subcategoría" onClose={()=>setCatModal(null)}><div style={{display:"flex",flexDirection:"column",gap:16}}><div><div style={{fontSize:11,color:C.t2,marginBottom:6}}>Nombre</div><input style={inp} value={subDraft.label} onChange={e=>setSubDraft(d=>({...d,label:e.target.value}))}/></div><IconPicker value={subDraft.icon} onChange={ic=>setSubDraft(d=>({...d,icon:ic}))}/><div style={{display:"flex",gap:8}}><Btn primary onClick={saveEditSub}>Guardar</Btn><Btn onClick={()=>setCatModal(null)}>Cancelar</Btn></div></div></Modal>}
 
+      {/* MODAL NUEVO MEDIO DE PAGO */}
+      {medioModal&&<Modal title="Nuevo medio de pago" onClose={()=>setMedioModal(false)}>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:6}}>Nombre</div>
+            <input style={inp} placeholder="Ej: Naranja X, Cuenta DNI, Brubank..." value={medioDraft.label} onChange={e=>setMedioDraft(d=>({...d,label:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&!medioSaving&&saveNewMedio()}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:8}}>Color</div>
+            <ColorPicker value={medioDraft.color} onChange={c=>setMedioDraft(d=>({...d,color:c}))}/>
+          </div>
+          {medioDraft.label&&<div style={{display:"flex",alignItems:"center",gap:8,background:C.bg3,border:`1px solid ${medioDraft.color}44`,borderRadius:9,padding:"10px 14px"}}>
+            <span style={{width:10,height:10,borderRadius:"50%",background:medioDraft.color,display:"inline-block"}}/>
+            <span style={{fontSize:12}}>{medioDraft.label}</span>
+            <span style={{fontSize:10,color:C.t3,marginLeft:4}}>preview</span>
+          </div>}
+          <div style={{display:"flex",gap:8}}>
+            <Btn primary onClick={saveNewMedio} disabled={medioSaving||!medioDraft.label.trim()}>{medioSaving?"Guardando...":"Crear"}</Btn>
+            <Btn onClick={()=>setMedioModal(false)}>Cancelar</Btn>
+          </div>
+        </div>
+      </Modal>}
+
       {budgetModal&&<Modal title={`Presupuesto — ${MONTHS[selMonth]} ${selYear}`} onClose={()=>setBudgetModal(false)} wide>
         <div style={{fontSize:12,color:C.t2,marginBottom:16}}>Podés poner límite a nivel <b style={{color:C.t}}>categoría</b> y/o a nivel <b style={{color:C.t}}>subcategoría</b>. Dejá vacío para sin límite.</div>
         {cats.map(cat=><div key={cat.id} style={{marginBottom:16,background:C.bg3,border:`1px solid ${C.bd}`,borderRadius:10,overflow:"hidden"}}>
@@ -2741,7 +2908,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
       {/* MODAL CARGA RÁPIDA */}
       {quickModal&&<QuickAddModal
         quickType={quickType} setQuickType={setQuickType}
-        cats={cats} MEDIOS_PAGO={MEDIOS_PAGO} todayISO={todayISO}
+        cats={cats} MEDIOS_PAGO={mediosTodos} todayISO={todayISO}
         tc={tc} C={C} inp={inp} sel={sel}
         quickSaving={quickSaving} quickError={quickError} quickOk={quickOk}
         saveQuick={saveQuick} setQuickError={setQuickError}
@@ -2757,7 +2924,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               <div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Monto ($)</div><input style={{...inp,fontSize:18,fontWeight:600,color:C.t}} type="number" placeholder="0" value={editGastoDraft.monto} onChange={e=>setEditGastoDraft(d=>({...d,monto:e.target.value}))}/></div>
               <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Categoría</div><select style={sel} value={editGastoDraft.cat} onChange={e=>{const c=cats.find(x=>x.id===e.target.value);setEditGastoDraft(d=>({...d,cat:e.target.value,sub:c?.items[0]?.id||""}));}}>{cats.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select></div>
               <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Subcategoría</div><select style={sel} value={editGastoDraft.sub} onChange={e=>setEditGastoDraft(d=>({...d,sub:e.target.value}))}>{catForEdit?.items.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
-              <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Medio de pago</div><select style={sel} value={editGastoDraft.medio_pago||"efectivo"} onChange={e=>setEditGastoDraft(d=>({...d,medio_pago:e.target.value}))}>{MEDIOS_PAGO.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
+              <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Medio de pago</div><select style={sel} value={editGastoDraft.medio_pago||"efectivo"} onChange={e=>setEditGastoDraft(d=>({...d,medio_pago:e.target.value}))}>{mediosTodos.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
               <div><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Fecha</div><input style={inp} type="date" value={editGastoDraft.fechaISO||""} onChange={e=>setEditGastoDraft(d=>({...d,fechaISO:e.target.value}))}/></div>
               <div style={{gridColumn:"1/-1"}}><div style={{fontSize:11,color:C.t2,marginBottom:4}}>Descripción</div><input style={inp} placeholder="Opcional..." value={editGastoDraft.descripcion||""} onChange={e=>setEditGastoDraft(d=>({...d,descripcion:e.target.value}))}/></div>
             </div>
