@@ -142,6 +142,13 @@ const C = {
   green:"#34C88A", red:"#E05C5C", blue:"#4E9EF5", purple:"#A78BFA", amber:"#F5A623", warning:"#F5A623",
 };
 
+const C_LIGHT = {
+  bg:"#F4F6FB", bg2:"#FFFFFF", bg3:"#EEF1F8", bg4:"#E3E8F0",
+  bd:"rgba(0,0,0,0.08)", bd2:"rgba(0,0,0,0.13)",
+  t:"#1A1E2A", t2:"#4A5068", t3:"#8891A8",
+  green:"#1A9E5F", red:"#C0392B", blue:"#2563EB", purple:"#7C3AED", amber:"#D97706", warning:"#D97706",
+};
+
 const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#C9A84C"/><stop offset="50%" stop-color="#F0C040"/><stop offset="100%" stop-color="#A0782A"/></linearGradient></defs><rect width="100" height="100" rx="22" fill="#0D0F14"/><text x="50" y="68" text-anchor="middle" font-size="62" font-weight="900" fill="url(#g1)" font-family="Georgia,serif">$</text></svg>`;
 const LOGO_URL = `data:image/svg+xml;base64,${btoa(LOGO_SVG)}`;
 
@@ -250,16 +257,28 @@ function Pill({ color, icon, label }) {
   return <span style={{background:color+"22",color,fontSize:11,padding:"2px 8px",borderRadius:20,fontWeight:500,display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>{icon&&<Ic id={icon} size={11} color={color}/>}{label}</span>;
 }
 
-function MCard({ label, value, color, accent, sub, icon }) {
+function MCard({ label, value, color, accent, sub, icon, progress, progressMax, semaforo }) {
+  const pct = (progress!=null&&progressMax>0) ? Math.min(Math.round((progress/progressMax)*100),100) : null;
+  // semaforo: "green"|"amber"|"red"|null
+  const semColor = semaforo==="green"?C.green:semaforo==="amber"?C.amber:semaforo==="red"?C.red:null;
   return <div className="card-anim" style={{background:`linear-gradient(135deg,${C.bg2} 60%,${color}0D 100%)`,borderRadius:14,padding:"18px 20px",flex:1,minWidth:130,border:`1px solid ${color}22`,position:"relative",overflow:"hidden",boxShadow:`0 4px 24px ${color}0A`}}>
     <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,${color}00,${color},${color}00)`}}/>
     <div style={{position:"absolute",top:-30,right:-20,width:80,height:80,borderRadius:"50%",background:color+"08"}}/>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
       <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:500}}>{label}</div>
-      {icon&&<div style={{width:26,height:26,borderRadius:8,background:color+"18",display:"flex",alignItems:"center",justifyContent:"center"}}><Ic id={icon} size={13} color={color}/></div>}
+      <div style={{display:"flex",alignItems:"center",gap:5}}>
+        {semColor&&<span style={{width:8,height:8,borderRadius:"50%",background:semColor,display:"inline-block",boxShadow:`0 0 6px ${semColor}88`,flexShrink:0}}/>}
+        {icon&&<div style={{width:26,height:26,borderRadius:8,background:color+"18",display:"flex",alignItems:"center",justifyContent:"center"}}><Ic id={icon} size={13} color={color}/></div>}
+      </div>
     </div>
     <div style={{fontSize:22,fontWeight:700,color,letterSpacing:"-0.02em",lineHeight:1}}>{value}</div>
-    {sub&&<div style={{fontSize:11,color:C.t3,marginTop:6}}>{sub}</div>}
+    {pct!==null&&<div style={{marginTop:8}}>
+      <div style={{height:3,borderRadius:3,background:C.bg4,overflow:"hidden"}}>
+        <div style={{height:"100%",borderRadius:3,background:`linear-gradient(90deg,${color}88,${color})`,width:`${pct}%`,transition:"width .6s ease"}}/>
+      </div>
+      <div style={{fontSize:10,color:C.t3,marginTop:3}}>{pct}% del total</div>
+    </div>}
+    {sub&&<div style={{fontSize:11,color:C.t3,marginTop:pct!==null?4:6}}>{sub}</div>}
   </div>;
 }
 
@@ -469,7 +488,37 @@ function QuickAddModal({quickType,setQuickType,cats,MEDIOS_PAGO,tiposTodos,today
   );
 }
 
+function AlertsAccordion({ totalAlertas, onDismissAll, children }) {
+  const [open, setOpen] = useState(false);
+  return(
+    <div style={{marginBottom:16,border:`1px solid ${C.red}33`,borderRadius:12,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(v=>!v)}
+        style={{width:"100%",background:C.red+"10",border:"none",cursor:"pointer",padding:"11px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{width:22,height:22,borderRadius:6,background:C.red+"33",display:"inline-flex",alignItems:"center",justifyContent:"center"}}>
+            <Ic id="flag" size={12} color={C.red}/>
+          </span>
+          <span style={{fontSize:12,fontWeight:600,color:C.red}}>{totalAlertas} {totalAlertas===1?"alerta activa":"alertas activas"}</span>
+          <span style={{fontSize:11,color:C.t3}}>— {open?"click para ocultar":"click para ver"}</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={e=>{e.stopPropagation();onDismissAll();}}
+            style={{background:C.red+"22",border:`1px solid ${C.red}33`,borderRadius:6,padding:"3px 10px",cursor:"pointer",color:C.red,fontSize:11,fontWeight:500}}>
+            Cerrar todas
+          </button>
+          <span style={{color:C.t3,fontSize:14,transition:"transform .2s",display:"inline-block",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+        </div>
+      </button>
+      {open&&<div style={{padding:"12px 14px 8px"}}>{children}</div>}
+    </div>
+  );
+}
+
 function Dashboard({ session }) {
+  const [themeMode,setThemeMode]=useState(()=>localStorage.getItem("fa_theme")||"dark");
+  // Paleta activa según tema
+  const C=themeMode==="light"?C_LIGHT:{bg:"#0D0F14",bg2:"#13161E",bg3:"#1A1E2A",bg4:"#222638",bd:"rgba(255,255,255,0.07)",bd2:"rgba(255,255,255,0.12)",t:"#F0F2F8",t2:"#8B91A8",t3:"#555D75",green:"#34C88A",red:"#E05C5C",blue:"#4E9EF5",purple:"#A78BFA",amber:"#F5A623",warning:"#F5A623"};
+  const toggleTheme=()=>setThemeMode(m=>{const next=m==="dark"?"light":"dark";localStorage.setItem("fa_theme",next);return next;});
   const userId=session.user.id;
   const [tab,setTab]=useState("dashboard");
   const [viewMode,setViewMode]=useState("month");
@@ -1999,7 +2048,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
 
   if(loading) return (
     <div style={{background:C.bg,minHeight:"100vh",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",fontSize:13,color:C.t,padding:20}}>
-      <style>{gCSS}</style>
+      <style>{`*{box-sizing:border-box;margin:0;padding:0}body{background:${C.bg}}.skeleton{background:linear-gradient(90deg,${C.bg3} 25%,${C.bg4} 50%,${C.bg3} 75%);background-size:200% 100%;animation:shimmer 1.4s ease infinite;border-radius:8px}@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}`}</style>
       <div style={{background:C.bg2,borderRadius:14,padding:"12px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
         <div className="skeleton" style={{width:32,height:32,borderRadius:9}}/>
         <div className="skeleton" style={{width:120,height:18,borderRadius:6}}/>
@@ -2015,7 +2064,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
 
   return (
     <div style={{background:C.bg,minHeight:"100vh",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",fontSize:13,color:C.t}}>
-      <style>{gCSS}</style>
+      <style>{`*{box-sizing:border-box;margin:0;padding:0}body{background:${C.bg};color:${C.t};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${C.bd2};border-radius:4px}select option{background:${C.bg3}}@keyframes pulse{0%,100%{opacity:0.3;transform:scale(0.8)}50%{opacity:1;transform:scale(1.2)}}@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}@keyframes popIn{0%{opacity:0;transform:scale(0.92) translateY(6px)}100%{opacity:1;transform:scale(1) translateY(0)}}.card-anim{animation:fadeUp .35s ease both}.save-ok{animation:popIn .25s ease both}.fs-11{font-size:11px}.fs-13{font-size:13px}.fs-15{font-size:15px}.fs-18{font-size:18px}.fs-22{font-size:22px}@media(max-width:600px){.hide-mobile{display:none!important}.show-mobile{display:flex!important}}@media(min-width:601px){.show-mobile{display:none!important}}.skeleton{background:linear-gradient(90deg,${C.bg3} 25%,${C.bg4} 50%,${C.bg3} 75%);background-size:200% 100%;animation:shimmer 1.4s ease infinite;border-radius:8px}@keyframes toastIn{from{opacity:0;transform:translateY(20px) scale(0.95)}to{opacity:1;transform:translateY(0) scale(1)}}@keyframes toastOut{from{opacity:1;transform:translateY(0) scale(1)}to{opacity:0;transform:translateY(10px) scale(0.95)}}.toast-enter{animation:toastIn .25s ease both}.toast-exit{animation:toastOut .2s ease both}@keyframes fabExpand{from{opacity:0;transform:scale(0.8) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}.fab-item{animation:fabExpand .2s ease both}`}</style>
       <ToastContainer/>
       {confirmNode}
 
@@ -2030,6 +2079,15 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             <span style={{fontWeight:700,fontSize:14,letterSpacing:"-0.01em"}}>FinanzasApp</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
+            {/* Toggle tema */}
+            <button onClick={toggleTheme} title={themeMode==="dark"?"Modo claro":"Modo oscuro"}
+              style={{background:themeMode==="light"?C.amber+"22":"none",border:`1px solid ${themeMode==="light"?C.amber+"66":C.bd}`,borderRadius:6,padding:"5px 8px",cursor:"pointer",color:themeMode==="light"?C.amber:C.t2,display:"flex",alignItems:"center",transition:"all .2s"}}>
+              <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                {themeMode==="dark"
+                  ?<><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></>
+                  :<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>}
+              </svg>
+            </button>
             {/* Ocultar montos */}
             <button onClick={()=>setHideAmounts(h=>!h)}
               style={{background:hideAmounts?C.amber+"22":"none",border:`1px solid ${hideAmounts?C.amber+"66":C.bd}`,borderRadius:6,padding:"5px 8px",cursor:"pointer",color:hideAmounts?C.amber:C.t2,display:"flex",alignItems:"center",transition:"all .2s"}}>
@@ -2230,36 +2288,47 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           );
         })()}
 
-        {/* ALERTS */}
+        {/* ALERTS — acordeón colapsable */}
         {viewMode==="month"&&(budAlerts.length>0||hormiga.length>0)&&(()=>{
           const visibleBudOver=budAlerts.filter(a=>!dismissedAlerts.has("bud_"+a.key));
           const visibleHormiga=hormiga.filter(h=>!dismissedAlerts.has("hrm_"+h.catId+h.subId));
           if(!visibleBudOver.length&&!visibleHormiga.length)return null;
+          const totalAlertas=visibleBudOver.length+visibleHormiga.length;
           const AlertRow=({id,color,icon,children})=>(
-            <div style={{background:color+"15",border:`1px solid ${color}44`,borderRadius:9,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+            <div style={{background:color+"15",border:`1px solid ${color}44`,borderRadius:9,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:10}}>
               <Ic id={icon} size={15} color={color}/>
               <span style={{fontSize:12,flex:1}}>{children}</span>
               <button onClick={()=>dismissAlert(id)} title="Cerrar" style={{background:"none",border:"none",cursor:"pointer",color:color,fontSize:16,lineHeight:1,padding:"0 2px",opacity:0.7,flexShrink:0}}>×</button>
             </div>
           );
-          return<div style={{marginBottom:16}}>
+          return<AlertsAccordion totalAlertas={totalAlertas} onDismissAll={()=>{
+            visibleBudOver.forEach(a=>dismissAlert("bud_"+a.key));
+            visibleHormiga.forEach(h=>dismissAlert("hrm_"+h.catId+h.subId));
+          }}>
             {visibleBudOver.map(a=><AlertRow key={a.key} id={"bud_"+a.key} color={C.red} icon={a.sub?a.sub.icon:a.cat.icon}>
               <b style={{color:C.red}}>Presupuesto excedido:</b> {a.label} — {fmtH(a.spent,currency,tc)} de {fmtH(a.budget,currency,tc)} ({a.pct}%)
             </AlertRow>)}
             {visibleHormiga.map(h=><AlertRow key={h.catId+h.subId} id={"hrm_"+h.catId+h.subId} color={C.purple} icon={h.icon||"activity"}>
               <b style={{color:C.purple}}>Gasto hormiga:</b> {h.subLabel} ({h.catLabel}) — {h.count} transacciones por {fmtH(h.total,currency,tc)} este mes
             </AlertRow>)}
-          </div>;
+          </AlertsAccordion>;
         })()}
 
         {/* DASHBOARD */}
         {tab==="dashboard"&&<>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:hayInversiones?10:18}}>
-            <MCard label="Ingresos" value={fmtH(totI,currency,tc)} color={C.green} icon="trend" sub={viewMode==="month"?`${MONTHS[selMonth]} ${selYear}`:`Año ${selYear}`}/>
-            <MCard label="Gastos" value={fmtH(totG,currency,tc)} color={C.red} icon="cart" sub={`${ad.length} transacciones`}/>
-            <MCard label="Invertido" value={fmtH(totInvARS,currency,tc)} color={C.purple} icon="briefcase" sub={hayInversiones?"Alocado · no disponible":"Sin inversiones este período"}/>
-            <MCard label="Disponible real" value={fmtH(dispGastarConRollover,currency,tc)} color={dispGastarConRollover>=0?C.blue:C.red} icon="dollar" sub={viewMode==="month"&&saldoRollover>0?"Incluye arrastre de "+MONTHS[selMonth===0?11:selMonth-1]:(dispGastarConRollover>=0?"Lo que realmente te sobra":"Gastaste más de lo que ingresó")}/>
-          </div>
+          {(()=>{
+            // Semáforo financiero: basado en disponible real vs ingresos
+            const pctDisp=totI>0?Math.round((dispGastarConRollover/totI)*100):0;
+            const semDisp=dispGastarConRollover<0?"red":pctDisp<10?"amber":"green";
+            const pctGastos=totI>0?Math.min(Math.round((totG/totI)*100),100):0;
+            const colorGastos=pctGastos>100?C.red:pctGastos>85?C.amber:C.red;
+            return<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:hayInversiones?10:18}}>
+              <MCard label="Ingresos" value={fmtH(totI,currency,tc)} color={C.green} icon="trend" sub={viewMode==="month"?`${MONTHS[selMonth]} ${selYear}`:`Año ${selYear}`}/>
+              <MCard label="Gastos" value={fmtH(totG,currency,tc)} color={colorGastos} icon="cart" sub={`${ad.length} transacciones`} progress={totG} progressMax={totI}/>
+              <MCard label="Invertido" value={fmtH(totInvARS,currency,tc)} color={C.purple} icon="briefcase" sub={hayInversiones?"Alocado · no disponible":"Sin inversiones este período"} progress={totInvARS} progressMax={totI}/>
+              <MCard label="Disponible real" value={fmtH(dispGastarConRollover,currency,tc)} color={dispGastarConRollover>=0?C.blue:C.red} icon="dollar" semaforo={semDisp} sub={viewMode==="month"&&saldoRollover>0?"Incluye arrastre de "+MONTHS[selMonth===0?11:selMonth-1]:(dispGastarConRollover>=0?"Lo que realmente te sobra":"Gastaste más de lo que ingresó")}/>
+            </div>;
+          })()}
           {/* ROLLOVER: arrastre del disponible real del mes anterior */}
           {viewMode==="month"&&saldoRollover>0&&<div style={{background:C.green+"10",border:"1px solid "+C.green+"33",borderRadius:10,padding:"10px 16px",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
