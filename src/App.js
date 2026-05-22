@@ -552,6 +552,9 @@ function Dashboard({ session }) {
   const userId=session.user.id;
   const [tab,setTab]=useState("dashboard");
   const [viewMode,setViewMode]=useState("month");
+  // rango de meses: selMonth = inicio, selMonthEnd/selYearEnd = fin
+  const [selMonthEnd,setSelMonthEnd]=useState(now.getMonth());
+  const [selYearEnd,setSelYearEnd]=useState(now.getFullYear());
   const [currency,setCurrency]=useState("ARS");
   const [tcManual,setTcManual]=useState(null);
   const [tcAuto,setTcAuto]=useState(null);
@@ -864,8 +867,37 @@ function Dashboard({ session }) {
   const monthIngresos=ingresos.filter(i=>i.year===selYear&&i.month===selMonth);
   const yearGastos=gastos.filter(g=>g.year===selYear).map(g=>({...g,_m:g.month}));
   const yearIngresos=ingresos.filter(i=>i.year===selYear).map(i=>({...i,_m:i.month}));
-  const ad=viewMode==="year"?yearGastos:monthGastos;
-  const ai=viewMode==="year"?yearIngresos:monthIngresos;
+
+  // Modo rango: filtra todos los meses entre selMonth/selYear y selMonthEnd/selYearEnd
+  const rangeGastos=useMemo(()=>{
+    if(viewMode!=="range")return[];
+    const desde=selYear*12+selMonth;
+    const hasta=selYearEnd*12+selMonthEnd;
+    const [d,h]=desde<=hasta?[desde,hasta]:[hasta,desde];
+    return gastos.filter(g=>{const t=g.year*12+g.month;return t>=d&&t<=h;}).map(g=>({...g,_m:g.month}));
+  },[viewMode,gastos,selMonth,selYear,selMonthEnd,selYearEnd]);
+  const rangeIngresos=useMemo(()=>{
+    if(viewMode!=="range")return[];
+    const desde=selYear*12+selMonth;
+    const hasta=selYearEnd*12+selMonthEnd;
+    const [d,h]=desde<=hasta?[desde,hasta]:[hasta,desde];
+    return ingresos.filter(i=>{const t=i.year*12+i.month;return t>=d&&t<=h;}).map(i=>({...i,_m:i.month}));
+  },[viewMode,ingresos,selMonth,selYear,selMonthEnd,selYearEnd]);
+
+  // Label del período seleccionado
+  const periodoLabel=useMemo(()=>{
+    if(viewMode==="month") return `${MONTHS[selMonth]} ${selYear}`;
+    if(viewMode==="year") return `Año ${selYear}`;
+    const desde=selYear*12+selMonth;
+    const hasta=selYearEnd*12+selMonthEnd;
+    const [d,h]=desde<=hasta?[desde,hasta]:[hasta,desde];
+    const mD=d%12,yD=Math.floor(d/12),mH=h%12,yH=Math.floor(h/12);
+    if(yD===yH) return `${MONTHS[mD]}–${MONTHS[mH]} ${yH}`;
+    return `${MONTHS[mD]} ${yD} – ${MONTHS[mH]} ${yH}`;
+  },[viewMode,selMonth,selYear,selMonthEnd,selYearEnd]);
+
+  const ad=viewMode==="year"?yearGastos:viewMode==="range"?rangeGastos:monthGastos;
+  const ai=viewMode==="year"?yearIngresos:viewMode==="range"?rangeIngresos:monthIngresos;
   const totG=ad.reduce((s,x)=>s+Number(x.monto),0);
   const totI=ai.reduce((s,x)=>s+Number(x.monto),0);
   const bal=totI-totG;
@@ -877,13 +909,22 @@ function Dashboard({ session }) {
   const yearInversionesAll=inversiones.filter(i=>i.anio===selYear);
 
   // totInvARS: depósitos netos del período seleccionado en ARS (retiros se descuentan)
-  const totInvARS=(viewMode==="year"?yearInversionesAll:monthInversiones)
-    .reduce((s,i)=>{
+  const totInvARS=(()=>{
+    let inv;
+    if(viewMode==="year") inv=yearInversionesAll;
+    else if(viewMode==="range"){
+      const desde=selYear*12+selMonth;
+      const hasta=selYearEnd*12+selMonthEnd;
+      const [d,h]=desde<=hasta?[desde,hasta]:[hasta,desde];
+      inv=inversiones.filter(i=>{const t=i.anio*12+i.mes;return t>=d&&t<=h;});
+    } else inv=monthInversiones;
+    return inv.reduce((s,i)=>{
       const m=Number(i.monto);
       const esRetiro=(i.descripcion||"").startsWith("[RETIRO]");
       const montoARS=i.moneda==="USD"?m*(i.tc_at_time||tc):m;
       return s+(esRetiro?-montoARS:montoARS);
     },0);
+  })();
 
   const byPlataforma=useMemo(()=>platTodasPlat.reduce((acc,p)=>{acc[p.id]=inversiones.filter(i=>i.plataforma===p.id).reduce((s,i)=>{const m=Number(i.monto);return s+(i.moneda==="USD"?m*(i.tc_at_time||tc):m);},0);return acc;},{}),[inversiones,platTodasPlat,tc]);
   const totalInvertidoHistorico=Object.values(byPlataforma).reduce((s,v)=>s+v,0);
@@ -2461,12 +2502,33 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           </div>
         </div>
         {/* Fila 2: controles de período y moneda — ancho completo */}
-        <div style={{display:"flex",alignItems:"center",gap:6,paddingBottom:8,flexWrap:"nowrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,paddingBottom:8,flexWrap:"wrap"}}>
           <div style={{display:"flex",background:C.bg3,border:`1px solid ${C.bd}`,borderRadius:6,overflow:"hidden",flexShrink:0}}>
-            {["month","year"].map(v=><button key={v} onClick={()=>setViewMode(v)} style={{padding:"5px 10px",fontSize:12,border:"none",cursor:"pointer",background:viewMode===v?C.bg4:"transparent",color:viewMode===v?C.t:C.t2}}>{v==="month"?"Mes":"Año"}</button>)}
+            {[{v:"month",l:"Mes"},{v:"range",l:"Rango"},{v:"year",l:"Año"}].map(({v,l})=>(
+              <button key={v} onClick={()=>{setViewMode(v);if(v==="range"&&selMonthEnd===selMonth&&selYearEnd===selYear){const end=(selMonth+2)%12;setSelMonthEnd(end);if(selMonth+2>11)setSelYearEnd(y=>y);} }} style={{padding:"5px 10px",fontSize:12,border:"none",cursor:"pointer",background:viewMode===v?C.bg4:"transparent",color:viewMode===v?C.t:C.t2,whiteSpace:"nowrap"}}>{l}</button>
+            ))}
           </div>
-          {viewMode==="month"&&<select value={selMonth} onChange={e=>setSelMonth(+e.target.value)} style={{...sel,padding:"5px 6px",fontSize:12,flex:1,minWidth:0}}>{MONTHS.map((m,i)=><option key={i} value={i}>{m}</option>)}</select>}
-          <select value={selYear} onChange={e=>setSelYear(+e.target.value)} style={{...sel,padding:"5px 6px",fontSize:12,width:72,flexShrink:0}}>{(()=>{const minY=gastos.length>0?Math.min(...gastos.map(g=>g.year)):now.getFullYear();const maxY=now.getFullYear()+1;const years=[];for(let y=minY;y<=maxY;y++)years.push(y);return years.map(y=><option key={y}>{y}</option>);})()}</select>
+          {/* Mes/año inicio — siempre visible en month y range */}
+          {viewMode!=="year"&&<>
+            <select value={selMonth} onChange={e=>setSelMonth(+e.target.value)} style={{...sel,padding:"5px 6px",fontSize:12,flex:viewMode==="range"?0:1,minWidth:0,width:viewMode==="range"?84:undefined}}>
+              {MONTHS.map((m,i)=><option key={i} value={i}>{m}</option>)}
+            </select>
+            <select value={selYear} onChange={e=>setSelYear(+e.target.value)} style={{...sel,padding:"5px 6px",fontSize:12,width:68,flexShrink:0}}>
+              {(()=>{const minY=gastos.length>0?Math.min(...gastos.map(g=>g.year)):now.getFullYear();const maxY=now.getFullYear()+1;const years=[];for(let y=minY;y<=maxY;y++)years.push(y);return years.map(y=><option key={y}>{y}</option>);})()}
+            </select>
+          </>}
+          {/* Año (modo año) */}
+          {viewMode==="year"&&<select value={selYear} onChange={e=>setSelYear(+e.target.value)} style={{...sel,padding:"5px 6px",fontSize:12,width:72,flexShrink:0}}>{(()=>{const minY=gastos.length>0?Math.min(...gastos.map(g=>g.year)):now.getFullYear();const maxY=now.getFullYear()+1;const years=[];for(let y=minY;y<=maxY;y++)years.push(y);return years.map(y=><option key={y}>{y}</option>);})()}</select>}
+          {/* Fin de rango */}
+          {viewMode==="range"&&<>
+            <span style={{fontSize:11,color:C.t3,flexShrink:0}}>→</span>
+            <select value={selMonthEnd} onChange={e=>setSelMonthEnd(+e.target.value)} style={{...sel,padding:"5px 6px",fontSize:12,width:84,flexShrink:0}}>
+              {MONTHS.map((m,i)=><option key={i} value={i}>{m}</option>)}
+            </select>
+            <select value={selYearEnd} onChange={e=>setSelYearEnd(+e.target.value)} style={{...sel,padding:"5px 6px",fontSize:12,width:68,flexShrink:0}}>
+              {(()=>{const minY=gastos.length>0?Math.min(...gastos.map(g=>g.year)):now.getFullYear();const maxY=now.getFullYear()+1;const years=[];for(let y=minY;y<=maxY;y++)years.push(y);return years.map(y=><option key={y}>{y}</option>);})()}
+            </select>
+          </>}
           <div style={{display:"flex",background:C.bg3,border:`1px solid ${C.bd}`,borderRadius:6,overflow:"hidden",flexShrink:0}}>
             {["ARS","USD"].map(c=><button key={c} onClick={()=>setCurrency(c)} style={{padding:"5px 10px",fontSize:12,border:"none",cursor:"pointer",background:currency===c?C.blue:"transparent",color:currency===c?"#fff":C.t2}}>{c}</button>)}
           </div>
@@ -2741,7 +2803,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             const pctGastos=totI>0?Math.min(Math.round((totG/totI)*100),100):0;
             const colorGastos=pctGastos>100?C.red:pctGastos>85?C.amber:C.red;
             return<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:hayInversiones?10:18}}>
-              <MCard label="Ingresos" value={fmtH(totI,currency,tc)} color={C.green} icon="trend" sub={viewMode==="month"?`${MONTHS[selMonth]} ${selYear}`:`Año ${selYear}`}/>
+              <MCard label="Ingresos" value={fmtH(totI,currency,tc)} color={C.green} icon="trend" sub={periodoLabel}/>
               <MCard label="Gastos" value={fmtH(totG,currency,tc)} color={colorGastos} icon="cart" sub={`${ad.length} transacciones`} progress={totG} progressMax={totI}/>
               <MCard label="Invertido" value={fmtH(totInvARS,currency,tc)} color={C.purple} icon="briefcase" sub={hayInversiones?"Alocado · no disponible":"Sin inversiones este período"} progress={totInvARS} progressMax={totI}/>
               <MCard label="Disponible real" value={fmtH(dispGastarConRollover,currency,tc)} color={dispGastarConRollover>=0?C.blue:C.red} icon="dollar" semaforo={semDisp} sub={viewMode==="month"&&saldoRollover>0?"Incluye arrastre de "+MONTHS[selMonth===0?11:selMonth-1]:(dispGastarConRollover>=0?"Lo que realmente te sobra":"Gastaste más de lo que ingresó")}/>
@@ -2760,35 +2822,6 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               <div style={{fontSize:16,fontWeight:700,color:C.green}}>+{fmtH(saldoRollover,currency,tc)}</div>
               <div style={{fontSize:11,color:C.t3}}>Disponible total este mes: <b style={{color:dispGastarConRollover>=0?C.green:C.red}}>{fmtH(dispGastarConRollover,currency,tc)}</b></div>
             </div>
-          </div>}
-
-          {/* ── #3 PROYECCIÓN CIERRE DE MES ───────────────────────────── */}
-          {proyeccionCierre&&totG>0&&<div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.blue}33`,borderRadius:12,padding:"14px 18px",marginBottom:14}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div>
-                <div style={{fontSize:11,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em"}}>📈 Proyección cierre de mes</div>
-                <div style={{fontSize:11,color:C.t3,marginTop:2}}>Día {proyeccionCierre.diaActual} de {proyeccionCierre.diasEnMes} · ritmo: {fmtH(Math.round(proyeccionCierre.ritmo),"ARS",tc)}/día</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:18,fontWeight:700,color:C.blue}}>{fmtH(proyeccionCierre.proyTotal,"ARS",tc)}</div>
-                <div style={{fontSize:11,color:C.t3}}>al 31/{MONTHS[selMonth]}</div>
-              </div>
-            </div>
-            {/* Barra de progreso del mes */}
-            <div style={{height:6,borderRadius:4,background:C.bg4,overflow:"hidden",marginBottom:10}}>
-              <div style={{height:"100%",borderRadius:4,background:`linear-gradient(90deg,${C.blue}88,${C.blue})`,width:`${proyeccionCierre.pctMes}%`,transition:"width .5s"}}/>
-            </div>
-            {/* Categorías con proyección vs presupuesto */}
-            {proyeccionCierre.porCat.filter(c=>c.superaBudget||c.proy>0).slice(0,5).map(c=>(
-              <div key={c.catId} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-                <span style={{width:18,height:18,borderRadius:5,background:c.color+"22",display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                  <Ic id={c.icon} size={9} color={c.color}/>
-                </span>
-                <span style={{fontSize:11,color:C.t2,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</span>
-                <span style={{fontSize:11,fontWeight:500,color:c.superaBudget?C.red:C.t}}>{fmtH(c.proy,"ARS",tc)}</span>
-                {c.bud&&<span style={{fontSize:10,color:c.superaBudget?C.red:C.t3}}>/ {fmtH(c.bud,"ARS",tc)} {c.superaBudget?"⚠":""}</span>}
-              </div>
-            ))}
           </div>}
 
           {/* ── #7 COMPARATIVA VS INFLACIÓN ────────────────────────────── */}
@@ -3035,7 +3068,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
         {/* GASTOS */}
         {tab==="gastos"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
-            <div style={{fontSize:14,fontWeight:500}}>Gastos — {viewMode==="year"?selYear:`${MONTHS[selMonth]} ${selYear}`} <span style={{fontSize:12,color:C.red,marginLeft:8}}>{fmtH(totG,currency,tc)}</span></div>
+            <div style={{fontSize:14,fontWeight:500}}>Gastos — {periodoLabel} <span style={{fontSize:12,color:C.red,marginLeft:8}}>{fmtH(totG,currency,tc)}</span></div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               <Btn small onClick={exportarCSV}>⬇ CSV</Btn>
               <Btn small onClick={exportarXLSX}>⬇ XLSX</Btn>
@@ -3211,7 +3244,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
         {/* INGRESOS */}
         {tab==="ingresos"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
-            <div style={{fontSize:14,fontWeight:500}}>Ingresos & Ahorros — {viewMode==="year"?selYear:`${MONTHS[selMonth]} ${selYear}`}</div>
+            <div style={{fontSize:14,fontWeight:500}}>Ingresos & Ahorros — {periodoLabel}</div>
             <div style={{display:"flex",gap:8}}>
               <Btn small onClick={exportarIngresos}>⬇ CSV</Btn>
               <Btn primary onClick={()=>setShowIngForm(!showIngForm)}>+ Agregar</Btn>
@@ -4860,6 +4893,74 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                       <div style={{fontSize:16,fontWeight:600,color}}>{ipc!==undefined?`${ipc}%`:"—"}</div>
                     </div>;
                   })}
+                </div>
+              </Card>}
+
+              {/* ── PROYECCIÓN CIERRE DE MES ── */}
+              {proyeccionCierre&&totG>0&&<Card title="📈 Proyección cierre de mes" subtitle={`Día ${proyeccionCierre.diaActual} de ${proyeccionCierre.diasEnMes} · ritmo ${fmtH(Math.round(proyeccionCierre.ritmo),"ARS",tc)}/día`}>
+                {/* Métricas */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10,marginBottom:16}}>
+                  <div style={{background:C.bg4,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                    <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Gastado hoy</div>
+                    <div style={{fontSize:17,fontWeight:700,color:C.red}}>{fmtH(totG,"ARS",tc)}</div>
+                    <div style={{fontSize:10,color:C.t3,marginTop:2}}>{proyeccionCierre.pctMes}% del mes</div>
+                  </div>
+                  <div style={{background:C.blue+"0D",border:`1px solid ${C.blue}22`,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                    <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Proyección total</div>
+                    <div style={{fontSize:17,fontWeight:700,color:C.blue}}>{fmtH(proyeccionCierre.proyTotal,"ARS",tc)}</div>
+                    <div style={{fontSize:10,color:C.t3,marginTop:2}}>al cierre del mes</div>
+                  </div>
+                  <div style={{background:C.amber+"0D",border:`1px solid ${C.amber}22`,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                    <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Resta gastar</div>
+                    <div style={{fontSize:17,fontWeight:700,color:C.amber}}>{fmtH(proyeccionCierre.proyResto,"ARS",tc)}</div>
+                    <div style={{fontSize:10,color:C.t3,marginTop:2}}>{proyeccionCierre.diasEnMes-proyeccionCierre.diaActual} días restantes</div>
+                  </div>
+                </div>
+                {/* Barra progreso */}
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:11,color:C.t3}}>Progreso del mes</span>
+                  <span style={{fontSize:11,fontWeight:600,color:C.blue}}>{proyeccionCierre.pctMes}%</span>
+                </div>
+                <div style={{height:8,borderRadius:5,background:C.bg4,overflow:"hidden",marginBottom:16}}>
+                  <div style={{height:"100%",borderRadius:5,background:`linear-gradient(90deg,${C.blue}88,${C.blue})`,width:`${proyeccionCierre.pctMes}%`,transition:"width .5s"}}/>
+                </div>
+                {/* Tabla por categoría */}
+                <div style={{fontSize:10,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Proyección por categoría</div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:320}}>
+                    <thead><tr style={{borderBottom:`1px solid ${C.bd}`}}>
+                      {["Categoría","Gastado","Proyección","Presupuesto","Estado"].map((h,i)=>(
+                        <th key={i} style={{padding:"5px 8px",textAlign:i===0?"left":"right",fontSize:10,fontWeight:500,color:C.t3,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {proyeccionCierre.porCat.sort((a,b)=>b.proy-a.proy).map(c=>(
+                        <tr key={c.catId} style={{borderBottom:`1px solid ${C.bd}`,background:c.superaBudget?C.red+"06":"transparent"}}>
+                          <td style={{padding:"6px 8px"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{width:18,height:18,borderRadius:5,background:c.color+"22",display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                                <Ic id={c.icon} size={9} color={c.color}/>
+                              </span>
+                              <span style={{color:C.t,fontWeight:500}}>{c.label}</span>
+                            </div>
+                          </td>
+                          <td style={{padding:"6px 8px",textAlign:"right",color:C.t2,whiteSpace:"nowrap"}}>{fmtH(c.gastadoHoy,"ARS",tc)}</td>
+                          <td style={{padding:"6px 8px",textAlign:"right",fontWeight:600,color:c.superaBudget?C.red:C.blue,whiteSpace:"nowrap"}}>{fmtH(c.proy,"ARS",tc)}</td>
+                          <td style={{padding:"6px 8px",textAlign:"right",color:C.t3,whiteSpace:"nowrap"}}>{c.bud?fmtH(c.bud,"ARS",tc):"—"}</td>
+                          <td style={{padding:"6px 8px",textAlign:"right",whiteSpace:"nowrap"}}>
+                            {c.bud
+                              ?<span style={{background:c.superaBudget?C.red+"22":C.green+"22",color:c.superaBudget?C.red:C.green,fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:8}}>
+                                {c.superaBudget?"⚠ Excede":"✓ OK"}
+                              </span>
+                              :<span style={{color:C.t3,fontSize:10}}>sin límite</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{marginTop:10,fontSize:11,color:C.t3,background:C.bg4,borderRadius:7,padding:"8px 12px"}}>
+                  Proyección basada en el ritmo promedio de {proyeccionCierre.diaActual} días. Puede variar si tus gastos no son uniformes durante el mes.
                 </div>
               </Card>}
             </>}
