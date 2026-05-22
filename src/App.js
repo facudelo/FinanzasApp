@@ -683,6 +683,22 @@ function Dashboard({ session }) {
   useEffect(()=>{loadBudgets(selMonth,selYear);},[loadBudgets,selMonth,selYear]);
   useEffect(()=>{fetchTC(true);},[]);// eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── ATAJOS DE TECLADO ────────────────────────────────────────────────────
+  useEffect(()=>{
+    const handler=(e)=>{
+      // No disparar si el foco está en un input/textarea/select
+      const tag=document.activeElement?.tagName;
+      if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT")return;
+      if(e.key==="n"||e.key==="N"){e.preventDefault();setQuickModal(true);setQuickType("gasto");setQuickError("");setQuickOk(false);}
+      if(e.key==="i"||e.key==="I"){e.preventDefault();setQuickModal(true);setQuickType("ingreso");setQuickError("");setQuickOk(false);}
+      if(e.key==="Escape"){setQuickModal(false);setAiModal(false);setAiCargaModal(false);setFabOpen(false);}
+      if(e.key==="ArrowLeft"&&!e.shiftKey){e.preventDefault();setSelMonth(m=>{if(m===0){setSelYear(y=>y-1);return 11;}return m-1;});}
+      if(e.key==="ArrowRight"&&!e.shiftKey){e.preventDefault();setSelMonth(m=>{if(m===11){setSelYear(y=>y+1);return 0;}return m+1;});}
+    };
+    window.addEventListener("keydown",handler);
+    return()=>window.removeEventListener("keydown",handler);
+  },[]);// eslint-disable-line react-hooks/exhaustive-deps
+
   const seedDefaultCats=async(uid)=>{
     const catRows=DEFAULT_CATS.map((c,i)=>({id:c.id,user_id:uid,label:c.label,color:c.color,icon:c.icon,sort_order:i}));
     const subRows=DEFAULT_CATS.flatMap(c=>c.items.map((s,i)=>({id:s.id,user_id:uid,cat_id:c.id,label:s.label,icon:s.icon,sort_order:i})));
@@ -2077,6 +2093,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               <img src={LOGO_URL} alt="Logo" style={{width:"100%",height:"100%"}}/>
             </div>
             <span style={{fontWeight:700,fontSize:14,letterSpacing:"-0.01em"}}>FinanzasApp</span>
+            <span title="Atajos: N=nuevo gasto · I=ingreso · ←→=cambiar mes · ESC=cerrar" style={{fontSize:10,color:C.t3,background:C.bg3,border:`1px solid ${C.bd}`,borderRadius:5,padding:"2px 6px",cursor:"default",display:"none"}} className="hide-mobile">⌨ Atajos</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
             {/* Toggle tema */}
@@ -3270,7 +3287,18 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
         </>}
 
         {/* PRESUPUESTO */}
-        {tab==="presupuesto"&&<>
+        {tab==="presupuesto"&&(()=>{
+          const totalPresupuestado=Object.entries(budgets).filter(([k])=>!k.includes("|")).reduce((s,[,v])=>s+v,0);
+          const gastadoEnCatsConBudget=cats.filter(c=>budgets[c.id]).reduce((s,c)=>s+(byCat[c.id]||0),0);
+          const sobrante=totalPresupuestado-gastadoEnCatsConBudget;
+          const pctGlobalUsado=totalPresupuestado>0?Math.round((gastadoEnCatsConBudget/totalPresupuestado)*100):null;
+          const colorGlobal=pctGlobalUsado>=100?C.red:pctGlobalUsado>=80?C.amber:C.green;
+          const catsBudgetadas=cats.filter(c=>budgets[c.id]||(c.items.some(s=>budgets[`${c.id}|${s.id}`])));
+          const catsExcedidas=cats.filter(c=>{
+            if(budgets[c.id]) return (byCat[c.id]||0)>budgets[c.id];
+            return c.items.some(s=>{const k=`${c.id}|${s.id}`;return budgets[k]&&(bySub[k]||0)>budgets[k];});
+          });
+          return<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8}}>
             <div>
               <div style={{fontSize:14,fontWeight:500}}>Presupuesto — {MONTHS[selMonth]} {selYear}</div>
@@ -3281,11 +3309,91 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               <Btn primary onClick={()=>{setBudgetDraft({...budgets});setBudgetModal(true);}}>Editar presupuestos</Btn>
             </div>
           </div>
-          {/* BANNER IPC ACUMULADO */}
-          {ipcAcumuladoPresupuesto!==null&&<div style={{background:C.amber+"0D",border:`1px solid ${C.amber}33`,borderRadius:9,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-            <div style={{fontSize:12,color:C.t2}}>
-              📈 Inflación acumulada desde enero {selYear}: <b style={{color:C.amber}}>{ipcAcumuladoPresupuesto}%</b>
+
+          {/* ── RESUMEN GLOBAL ─────────────────────────────────────────────── */}
+          {Object.keys(budgets).length>0&&totalPresupuestado>0&&<div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${colorGlobal}44`,borderRadius:14,padding:"18px 20px",marginBottom:16,boxShadow:`0 4px 20px ${colorGlobal}0A`}}>
+            <div style={{fontSize:10,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Resumen global — {MONTHS[selMonth]} {selYear}</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10,marginBottom:16}}>
+              <div style={{background:C.bg4,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Presupuestado</div>
+                <div style={{fontSize:17,fontWeight:700,color:C.blue}}>{fmtH(totalPresupuestado,currency,tc)}</div>
+                <div style={{fontSize:10,color:C.t3,marginTop:2}}>{catsBudgetadas.length} categorías</div>
+              </div>
+              <div style={{background:C.bg4,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Gastado</div>
+                <div style={{fontSize:17,fontWeight:700,color:colorGlobal}}>{fmtH(gastadoEnCatsConBudget,currency,tc)}</div>
+                <div style={{fontSize:10,color:C.t3,marginTop:2}}>{pctGlobalUsado!==null?`${pctGlobalUsado}% del límite`:""}</div>
+              </div>
+              <div style={{background:sobrante>=0?C.green+"12":C.red+"12",border:`1px solid ${sobrante>=0?C.green:C.red}33`,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{sobrante>=0?"Disponible":"Excedido"}</div>
+                <div style={{fontSize:17,fontWeight:700,color:sobrante>=0?C.green:C.red}}>{fmtH(Math.abs(sobrante),currency,tc)}</div>
+                <div style={{fontSize:10,color:C.t3,marginTop:2}}>{sobrante>=0?"Margen restante":"Sobre el límite"}</div>
+              </div>
+              <div style={{background:catsExcedidas.length>0?C.red+"12":C.green+"12",border:`1px solid ${catsExcedidas.length>0?C.red:C.green}33`,borderRadius:10,padding:"12px 14px",textAlign:"center"}}>
+                <div style={{fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Excedidas</div>
+                <div style={{fontSize:17,fontWeight:700,color:catsExcedidas.length>0?C.red:C.green}}>{catsExcedidas.length}</div>
+                <div style={{fontSize:10,color:C.t3,marginTop:2}}>de {catsBudgetadas.length}</div>
+              </div>
             </div>
+            {pctGlobalUsado!==null&&<>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                <span style={{fontSize:11,color:C.t2}}>Uso global del presupuesto</span>
+                <span style={{fontSize:12,fontWeight:600,color:colorGlobal}}>{pctGlobalUsado}%</span>
+              </div>
+              <div style={{height:10,borderRadius:6,background:C.bg4,overflow:"hidden",marginBottom:14}}>
+                <div style={{height:"100%",borderRadius:6,background:`linear-gradient(90deg,${colorGlobal}88,${colorGlobal})`,width:`${Math.min(pctGlobalUsado,100)}%`,transition:"width .6s ease"}}/>
+              </div>
+            </>}
+            {/* Tabla comparativa */}
+            <div style={{fontSize:10,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Comparativo por categoría</div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:360}}>
+                <thead><tr style={{borderBottom:`1px solid ${C.bd}`}}>
+                  {["Categoría","Gastado","Límite","Uso","Diferencia"].map((h,i)=>(
+                    <th key={i} style={{padding:"6px 10px",textAlign:i===0?"left":"right",fontSize:10,fontWeight:500,color:C.t3,textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {cats.filter(c=>budgets[c.id]||(byCat[c.id]>0)).map(c=>{
+                    const gastado=byCat[c.id]||0;
+                    const bud=budgets[c.id]||null;
+                    const pct=bud?Math.round((gastado/bud)*100):null;
+                    const over=pct&&pct>=100,warn=pct&&pct>=80&&!over;
+                    const diff=bud!==null?bud-gastado:null;
+                    const rc=over?C.red:warn?C.amber:C.t;
+                    return<tr key={c.id} style={{borderBottom:`1px solid ${C.bd}`,background:over?C.red+"06":warn?C.amber+"06":"transparent"}}>
+                      <td style={{padding:"7px 10px"}}><div style={{display:"flex",alignItems:"center",gap:7}}>
+                        <span style={{width:20,height:20,borderRadius:5,background:c.color+"22",display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic id={c.icon} size={10} color={c.color}/></span>
+                        <span style={{color:C.t,fontWeight:500}}>{c.label}</span>
+                        {!bud&&<span style={{fontSize:9,color:C.t3,background:C.bg4,padding:"1px 5px",borderRadius:4}}>sin límite</span>}
+                      </div></td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:600,color:rc,whiteSpace:"nowrap"}}>{fmtH(gastado,currency,tc)}</td>
+                      <td style={{padding:"7px 10px",textAlign:"right",color:C.t2,whiteSpace:"nowrap"}}>{bud?fmtH(bud,currency,tc):"—"}</td>
+                      <td style={{padding:"7px 10px",textAlign:"right",whiteSpace:"nowrap"}}>
+                        {pct!==null?<><span style={{color:rc,fontWeight:600}}>{pct}%</span>
+                          <div style={{width:55,height:4,background:C.bg4,borderRadius:3,overflow:"hidden",marginTop:3,marginLeft:"auto"}}>
+                            <div style={{height:"100%",width:`${Math.min(pct,100)}%`,background:over?C.red:warn?C.amber:C.green,borderRadius:3}}/>
+                          </div></>:<span style={{color:C.t3}}>—</span>}
+                      </td>
+                      <td style={{padding:"7px 10px",textAlign:"right",fontWeight:500,color:diff===null?C.t3:diff>=0?C.green:C.red,whiteSpace:"nowrap"}}>
+                        {diff!==null?(diff>=0?"+":"")+fmtH(Math.abs(diff),currency,tc):"—"}
+                      </td>
+                    </tr>;
+                  })}
+                  <tr style={{borderTop:`2px solid ${C.bd2}`,background:C.bg4}}>
+                    <td style={{padding:"9px 10px",fontWeight:700,color:C.t}}>TOTAL</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:colorGlobal,whiteSpace:"nowrap"}}>{fmtH(gastadoEnCatsConBudget,currency,tc)}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:C.t2,whiteSpace:"nowrap"}}>{fmtH(totalPresupuestado,currency,tc)}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:colorGlobal,whiteSpace:"nowrap"}}>{pctGlobalUsado}%</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontWeight:700,color:sobrante>=0?C.green:C.red,whiteSpace:"nowrap"}}>{sobrante>=0?"+":""}{fmtH(Math.abs(sobrante),currency,tc)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>}
+
+          {ipcAcumuladoPresupuesto!==null&&<div style={{background:C.amber+"0D",border:`1px solid ${C.amber}33`,borderRadius:9,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <div style={{fontSize:12,color:C.t2}}>📈 Inflación acumulada desde enero {selYear}: <b style={{color:C.amber}}>{ipcAcumuladoPresupuesto}%</b></div>
             <div style={{fontSize:11,color:C.t3}}>
               Un presupuesto de {fmtH(100000,"ARS",tc)} de enero equivale hoy a <b style={{color:C.amber}}>{fmtH(Math.round(100000*(1+ipcAcumuladoPresupuesto/100)),"ARS",tc)}</b>
               {!inflData&&<button onClick={fetchInflacion} style={{marginLeft:10,background:C.amber+"22",border:`1px solid ${C.amber}44`,borderRadius:5,padding:"2px 8px",cursor:"pointer",color:C.amber,fontSize:10}}>Cargar IPC</button>}
@@ -3298,6 +3406,7 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             ✓ Presupuesto activo para <b style={{color:C.t}}>{MONTHS[selMonth]} {selYear}</b> · {Object.keys(budgets).length} reglas definidas
             {ipcAcumuladoPresupuesto&&inflData&&<span style={{marginLeft:8,color:C.amber}}>· Indexar al IPC: multiplicar límites por <b>{(1+ipcAcumuladoPresupuesto/100).toFixed(2)}x</b></span>}
           </div>}
+
           {cats.map(cat=>{
             const val=byCat[cat.id]||0;
             const bud=budgets[cat.id];
@@ -3305,7 +3414,6 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             const over=pct&&pct>=100,warn=pct&&pct>=80&&pct<100;
             const subsWithBudget=cat.items.filter(s=>budgets[`${cat.id}|${s.id}`]||bySub[`${cat.id}|${s.id}`]>0);
             return<div key={cat.id} style={{background:C.bg2,border:`1px solid ${over?C.red+"44":warn?C.amber+"44":C.bd}`,borderRadius:12,marginBottom:10,overflow:"hidden"}}>
-              {/* Categoría header */}
               <div style={{padding:"16px 18px",borderBottom:subsWithBudget.length?`1px solid ${C.bd}`:"none"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:bud?10:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -3326,7 +3434,6 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                 </>}
                 {!bud&&<div style={{fontSize:11,color:C.t3,marginTop:4}}>Sin límite de categoría definido</div>}
               </div>
-              {/* Subcategorías */}
               {subsWithBudget.length>0&&<div style={{padding:"12px 18px",display:"flex",flexDirection:"column",gap:10}}>
                 {subsWithBudget.map(sub=>{
                   const key=`${cat.id}|${sub.id}`;
@@ -3355,7 +3462,8 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
               </div>}
             </div>;
           })}
-        </>}
+          </>;
+        })()}
 
         {/* GRÁFICOS */}
         {tab==="gráficos"&&(()=>{
