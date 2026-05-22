@@ -590,6 +590,56 @@ function Dashboard({ session }) {
   const [filtroCat,setFiltroCat]=useState("todas");
   const [filtroMedio,setFiltroMedio]=useState("todos");
 
+  // ─── BÚSQUEDA RÁPIDA DASHBOARD ────────────────────────────────────────────
+  const [dashSearch,setDashSearch]=useState("");
+
+  // ─── IMPORTAR CSV ─────────────────────────────────────────────────────────
+  const [csvModal,setCsvModal]=useState(false);
+  const [csvRows,setCsvRows]=useState([]);
+  const [csvMapped,setCsvMapped]=useState([]);
+  const [csvLoading,setCsvLoading]=useState(false);
+  const [csvError,setCsvError]=useState("");
+  const [csvSaving,setCsvSaving]=useState(false);
+
+  // ─── RECORDATORIO RECURRENTES ──────────────────────────────────────────────
+  const [reminderDismissed,setReminderDismissed]=useState(()=>{
+    try{return localStorage.getItem("fa_rec_reminder_"+new Date().toISOString().slice(0,7))==="1";}catch{return false;}
+  });
+
+  // ─── EDICIÓN INLINE ────────────────────────────────────────────────────────
+  const [inlineEditId,setInlineEditId]=useState(null);
+  const [inlineEditData,setInlineEditData]=useState({});
+
+  // ─── HISTORIAL CAMBIOS ─────────────────────────────────────────────────────
+  const [changeLog,setChangeLog]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem("fa_changelog")||"[]");}catch{return[];}
+  });
+  const [changeLogModal,setChangeLogModal]=useState(false);
+  const addChangeLog=(action,detail)=>{
+    const entry={ts:new Date().toISOString(),action,detail};
+    setChangeLog(prev=>{
+      const next=[entry,...prev].slice(0,100);
+      try{localStorage.setItem("fa_changelog",JSON.stringify(next));}catch{}
+      return next;
+    });
+  };
+
+  // ─── COMPARTIR MES ─────────────────────────────────────────────────────────
+  const [shareModal,setShareModal]=useState(false);
+  const [shareUrl,setShareUrl]=useState("");
+
+  // ─── ONBOARDING ────────────────────────────────────────────────────────────
+  const [onboardingStep,setOnboardingStep]=useState(()=>{
+    try{return parseInt(localStorage.getItem("fa_onboarding")||"0");}catch{return 0;}
+  });
+  const [showOnboarding,setShowOnboarding]=useState(()=>{
+    try{return localStorage.getItem("fa_onboarding_done")!=="1";}catch{return true;}
+  });
+  const completeOnboarding=()=>{
+    try{localStorage.setItem("fa_onboarding_done","1");}catch{}
+    setShowOnboarding(false);
+  };
+
   // ─── GASTOS RECURRENTES ────────────────────────────────────────────────────
   const [recurrentesModal,setRecurrentesModal]=useState(false);
   const [recurrentes,setRecurrentes]=useState([]);
@@ -1599,6 +1649,160 @@ Dá 4 consejos de inversión concretos y accionables para Argentina en este mome
     setShowForm(false);
   };
 
+  // ─── EXPORTAR XLSX ────────────────────────────────────────────────────────
+  const exportarXLSX=async()=>{
+    const data=viewMode==="year"?yearGastos:monthGastos;
+    if(!data.length){toast("No hay datos para exportar.","warning");return;}
+    try{
+      const XLSX=await loadSheetJS();
+      // Hoja 1: gastos detalle
+      const wsData=[
+        ["Fecha","Año","Mes","Categoría","Subcategoría","Descripción","Monto ARS","Medio de Pago","TC al momento","Monto USD (aprox)"],
+        ...data.map(g=>{const tcR=g.tc_at_time||tc;return[g.fecha||"",g.year||"",MONTHS[g.month]||"",g.cat_label||g.cat||"",g.sub_label||g.sub||"",g.descripcion||"",Number(g.monto),g.medio_pago||"efectivo",tcR,+(g.monto/tcR).toFixed(2)];})
+      ];
+      // Hoja 2: resumen por categoría
+      const resData=[
+        ["Categoría","Total ARS","% del total","Presupuesto","Diferencia"],
+        ...cats.filter(c=>byCat[c.id]>0).sort((a,b)=>(byCat[b.id]||0)-(byCat[a.id]||0)).map(c=>{
+          const v=byCat[c.id]||0;const b=budgets[c.id]||null;
+          return[c.label,v,totG>0?+(v/totG*100).toFixed(1):0,b||"",b?b-v:""];
+        }),
+        ["TOTAL",totG,"100%","",""]
+      ];
+      const wb=XLSX.utils.book_new();
+      const ws1=XLSX.utils.aoa_to_sheet(wsData);
+      const ws2=XLSX.utils.aoa_to_sheet(resData);
+      XLSX.utils.book_append_sheet(wb,ws1,"Gastos");
+      XLSX.utils.book_append_sheet(wb,ws2,"Resumen");
+      XLSX.writeFile(wb,`finanzas_${viewMode==="year"?selYear:`${MONTHS[selMonth]}_${selYear}`}.xlsx`);
+      toast("✓ XLSX exportado","success");
+    }catch(e){toast("Error al exportar: "+e.message,"error");}
+  };
+
+  // ─── IMPORTAR CSV BANCARIO ────────────────────────────────────────────────
+  // Detecta formato BNA, BBVA, Galicia por columnas
+  const parsearCSVBanco=async(file)=>{
+    setCsvLoading(true);setCsvError("");setCsvRows([]);setCsvMapped([]);
+    try{
+      const text=await file.text();
+      const lines=text.split(/\r?\n/).filter(l=>l.trim());
+      if(lines.length<2){setCsvError("Archivo vacío o sin datos.");setCsvLoading(false);return;}
+      // Detectar separador
+      const sep=lines[0].includes(";")?";":",";
+      const headers=lines[0].split(sep).map(h=>h.trim().replace(/"/g,"").toLowerCase());
+      const rows=lines.slice(1).map(l=>{
+        const vals=l.split(sep).map(v=>v.trim().replace(/"/g,""));
+        const obj={};headers.forEach((h,i)=>{obj[h]=vals[i]||"";});
+        return obj;
+      }).filter(r=>Object.values(r).some(v=>v));
+      // Detectar banco por columnas
+      let banco="generico";
+      if(headers.some(h=>h.includes("débito")||h.includes("debito"))) banco="bna";
+      else if(headers.some(h=>h.includes("importe"))) banco="bbva";
+      else if(headers.some(h=>h.includes("monto"))) banco="galicia";
+      // Mapear filas a formato gasto
+      const mapped=rows.map((r,i)=>{
+        let monto=0,fecha="",desc="";
+        if(banco==="bna"){
+          monto=parseFloat((r["débito"]||r["debito"]||"0").replace(/\./g,"").replace(",","."))||0;
+          fecha=r["fecha"]||r["fecha valor"]||"";
+          desc=r["descripción"]||r["descripcion"]||r["concepto"]||"";
+        } else if(banco==="bbva"){
+          monto=parseFloat((r["importe"]||"0").replace(/\./g,"").replace(",","."))||0;
+          fecha=r["fecha"]||r["f. valor"]||"";
+          desc=r["concepto"]||r["descripción"]||"";
+        } else if(banco==="galicia"){
+          monto=parseFloat((r["monto"]||"0").replace(/\./g,"").replace(",","."))||0;
+          fecha=r["fecha"]||"";
+          desc=r["descripción"]||r["descripcion"]||r["comercio"]||"";
+        } else {
+          // genérico: buscar columnas más comunes
+          const kMonto=headers.find(h=>h.includes("monto")||h.includes("importe")||h.includes("débito")||h.includes("debito")||h.includes("amount"));
+          const kFecha=headers.find(h=>h.includes("fecha")||h.includes("date"));
+          const kDesc=headers.find(h=>h.includes("desc")||h.includes("concepto")||h.includes("comercio")||h.includes("detail"));
+          monto=parseFloat((r[kMonto]||"0").replace(/\./g,"").replace(",","."))||0;
+          fecha=r[kFecha]||"";
+          desc=r[kDesc]||"";
+        }
+        if(monto<0) monto=-monto; // normalizar negativos
+        // Auto-asignar categoría básica por palabras clave
+        const dl=desc.toLowerCase();
+        let cat="otros",sub="imprevistos";
+        if(dl.includes("super")||dl.includes("coto")||dl.includes("dia")||dl.includes("carrefour")||dl.includes("jumbo")){cat="alimentacion";sub="supermercado";}
+        else if(dl.includes("farmacia")||dl.includes("drogueria")){cat="salud";sub="medicamentos";}
+        else if(dl.includes("nafta")||dl.includes("ypf")||dl.includes("shell")||dl.includes("axion")){cat="transporte";sub="nafta";}
+        else if(dl.includes("netflix")||dl.includes("spotify")||dl.includes("disney")||dl.includes("hbo")){cat="ocio";sub="streaming";}
+        else if(dl.includes("peaje")){cat="transporte";sub="peaje";}
+        else if(dl.includes("restaur")||dl.includes("mcdo")||dl.includes("burger")||dl.includes("pizza")){cat="alimentacion";sub="restaurante";}
+        else if(dl.includes("delivery")||dl.includes("pedidos ya")||dl.includes("rappi")){cat="alimentacion";sub="delivery";}
+        return{_id:i,monto,fecha,desc,cat,sub,seleccionado:monto>0};
+      }).filter(r=>r.monto>0);
+      setCsvRows(rows);setCsvMapped(mapped);
+      toast(`✓ ${mapped.length} movimientos detectados (banco: ${banco})`,"success");
+    }catch(e){setCsvError("Error al parsear: "+e.message);}
+    setCsvLoading(false);
+  };
+
+  const guardarCSVImportados=async()=>{
+    const seleccionados=csvMapped.filter(r=>r.seleccionado);
+    if(!seleccionados.length){toast("No hay filas seleccionadas.","warning");return;}
+    setCsvSaving(true);
+    const filas=seleccionados.map(r=>{
+      const cat=cats.find(c=>c.id===r.cat)||cats[cats.length-1];
+      const sub=cat?.items.find(s=>s.id===r.sub)||cat?.items[0];
+      // parsear fecha DD/MM/AAAA o AAAA-MM-DD
+      let fechaFmt=todayISO();
+      if(r.fecha){
+        const parts=r.fecha.includes("/")?r.fecha.split("/"):r.fecha.split("-");
+        if(parts.length===3){
+          fechaFmt=parts[0].length===4?r.fecha:`${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;
+        }
+      }
+      const d=new Date(fechaFmt+"T12:00:00");
+      return{user_id:userId,year:d.getFullYear(),month:d.getMonth(),cat:cat.id,sub:sub?.id||"",monto:r.monto,descripcion:r.desc||"Importado CSV",medio_pago:"transferencia",fecha:d.toLocaleDateString("es-AR"),tc_at_time:tc,cat_label:cat?.label,sub_label:sub?.label,sub_icon:sub?.icon,cat_color:cat?.color,cat_icon:cat?.icon};
+    });
+    const {data:saved,error}=await supabase.from("gastos").insert(filas).select();
+    if(error){toast("Error: "+error.message,"error");setCsvSaving(false);return;}
+    if(saved)setGastos(gs=>[...gs,...saved]);
+    addChangeLog("Importación CSV",`${saved.length} gastos importados`);
+    toast(`✓ ${saved.length} gastos importados`,"success");
+    setCsvModal(false);setCsvRows([]);setCsvMapped([]);setCsvSaving(false);
+  };
+
+  // ─── COMPARTIR MES ────────────────────────────────────────────────────────
+  const generarShareUrl=()=>{
+    const resumen={
+      mes:MONTHS[selMonth],anio:selYear,
+      ingresos:totI,gastos:totG,disponible:dispGastarConRollover,
+      categorias:cats.filter(c=>byCat[c.id]>0).map(c=>({label:c.label,total:byCat[c.id],pct:totG>0?Math.round((byCat[c.id]/totG)*100):0})).sort((a,b)=>b.total-a.total)
+    };
+    const b64=btoa(unescape(encodeURIComponent(JSON.stringify(resumen))));
+    const url=`${window.location.origin}${window.location.pathname}?share=${b64}`;
+    setShareUrl(url);setShareModal(true);
+  };
+
+  // ─── RECORDATORIO RECURRENTES ─────────────────────────────────────────────
+  const hayRecurrentesSinAplicar=useMemo(()=>{
+    if(!recurrentes.length)return false;
+    // Si hay recurrentes definidos y ningún gasto del mes actual viene de recurrente
+    const gastosMesConRec=monthGastos.filter(g=>g.recurrente_id).length;
+    return gastosMesConRec===0&&recurrentes.length>0;
+  },[recurrentes,monthGastos]);
+
+  // ─── GUARDAR INLINE EDIT ──────────────────────────────────────────────────
+  const saveInlineEdit=async(gastoId)=>{
+    if(!inlineEditData.monto||parseFloat(inlineEditData.monto)<=0)return;
+    const cat=cats.find(c=>c.id===inlineEditData.cat);
+    const sub=cat?.items.find(s=>s.id===inlineEditData.sub);
+    const updates={monto:parseFloat(inlineEditData.monto),cat:inlineEditData.cat,sub:inlineEditData.sub,cat_label:cat?.label,sub_label:sub?.label,sub_icon:sub?.icon,cat_color:cat?.color,cat_icon:cat?.icon,descripcion:inlineEditData.descripcion||null};
+    const {error}=await supabase.from("gastos").update(updates).eq("id",gastoId).eq("user_id",userId);
+    if(error){toast("Error: "+error.message,"error");return;}
+    setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,...updates}:g));
+    addChangeLog("Edición gasto",`ID ${gastoId} → $${updates.monto} (${cat?.label})`);
+    setInlineEditId(null);setInlineEditData({});
+    toast("✓ Gasto actualizado","success");
+  };
+
   // ─── EXPORTAR CSV ─────────────────────────────────────────────────────────
   const exportarCSV=()=>{
     const data=viewMode==="year"?yearGastos:monthGastos;
@@ -2223,7 +2427,12 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
         <button onClick={()=>setShowTCPanel(v=>!v)} style={{background:showTCPanel?C.blue+"22":"none",border:`1px solid ${showTCPanel?C.blue+"44":C.bd}`,borderRadius:6,padding:"3px 10px",cursor:"pointer",color:showTCPanel?C.blue:C.t3,fontSize:11,marginLeft:4}}>
           {showTCPanel?"▲ Cotizaciones":"▼ Cotizaciones"}
         </button>
-        <div style={{marginLeft:"auto",display:"flex",gap:6}}><Btn small onClick={()=>{setAiCargaModal(true);setAiCargaResult(null);setAiCargaText("");setAiCargaBulk("");setAiCargaImageB64(null);setAiCargaImageName("");}}>⚡ Cargar con IA</Btn><Btn small primary onClick={()=>{setAiResponse("");setAiModal(true);}}>✦ Análisis IA</Btn></div>
+        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          <Btn small onClick={generarShareUrl} title="Compartir resumen del mes">↗ Compartir</Btn>
+          <Btn small onClick={()=>setChangeLogModal(true)} title="Historial de cambios">📋 Historial</Btn>
+          <Btn small onClick={()=>{setAiCargaModal(true);setAiCargaResult(null);setAiCargaText("");setAiCargaBulk("");setAiCargaImageB64(null);setAiCargaImageName("");}}>⚡ Cargar con IA</Btn>
+          <Btn small primary onClick={()=>{setAiResponse("");setAiModal(true);}}>✦ Análisis IA</Btn>
+        </div>
       </div>
 
       {/* PANEL COTIZACIONES */}
@@ -2304,6 +2513,56 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             </div>
           );
         })()}
+
+        {/* RECORDATORIO RECURRENTES */}
+        {viewMode==="month"&&hayRecurrentesSinAplicar&&!reminderDismissed&&(
+          <div style={{background:C.amber+"12",border:`1px solid ${C.amber}44`,borderRadius:10,padding:"10px 16px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <Ic id="flag" size={14} color={C.amber}/>
+              <span style={{fontSize:12,color:C.t2}}>Tenés <b style={{color:C.amber}}>{recurrentes.length} gasto{recurrentes.length!==1?"s":""} recurrente{recurrentes.length!==1?"s":""}</b> sin aplicar en {MONTHS[selMonth]}.</span>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setRecurrentesModal(true)} style={{background:C.amber+"22",border:`1px solid ${C.amber}44`,borderRadius:6,padding:"4px 12px",cursor:"pointer",color:C.amber,fontSize:11,fontWeight:600}}>Aplicar ahora</button>
+              <button onClick={()=>{setReminderDismissed(true);try{localStorage.setItem("fa_rec_reminder_"+new Date().toISOString().slice(0,7),"1");}catch{}}} style={{background:"none",border:"none",cursor:"pointer",color:C.t3,fontSize:16}}>×</button>
+            </div>
+          </div>
+        )}
+
+        {/* BÚSQUEDA RÁPIDA DASHBOARD */}
+        {tab==="dashboard"&&<div style={{marginBottom:12}}>
+          <div style={{position:"relative"}}>
+            <input
+              style={{...inp,paddingLeft:34,fontSize:12}}
+              placeholder="🔍 Buscar gasto rápido en el dashboard..."
+              value={dashSearch}
+              onChange={e=>setDashSearch(e.target.value)}
+            />
+            {dashSearch&&<button onClick={()=>setDashSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.t3,fontSize:16}}>×</button>}
+          </div>
+          {dashSearch&&(()=>{
+            const dl=dashSearch.toLowerCase();
+            const matches=monthGastos.filter(g=>
+              (g.descripcion||"").toLowerCase().includes(dl)||
+              (g.sub_label||"").toLowerCase().includes(dl)||
+              (g.cat_label||"").toLowerCase().includes(dl)||
+              String(g.monto).includes(dl)
+            ).slice(0,8);
+            if(!matches.length) return<div style={{fontSize:12,color:C.t3,padding:"8px 12px"}}>Sin resultados para "{dashSearch}"</div>;
+            return<div style={{background:C.bg2,border:`1px solid ${C.bd}`,borderRadius:10,marginTop:4,overflow:"hidden"}}>
+              {matches.map(g=>{
+                const cat=cats.find(c=>c.id===g.cat);
+                return<div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 14px",borderBottom:`1px solid ${C.bd}`,fontSize:12}}>
+                  <div style={{width:24,height:24,borderRadius:6,background:(cat?.color||C.blue)+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <Ic id={g.sub_icon||cat?.icon||"cart"} size={11} color={cat?.color||C.blue}/>
+                  </div>
+                  <span style={{flex:1,color:C.t2}}>{g.sub_label||g.sub} {g.descripcion?<span style={{color:C.t3}}>· {g.descripcion}</span>:null}</span>
+                  <span style={{fontSize:11,color:C.t3}}>{g.fecha}</span>
+                  <span style={{fontWeight:600,color:cat?.color||C.blue}}>{fmtH(g.monto,currency,tc)}</span>
+                </div>;
+              })}
+            </div>;
+          })()}
+        </div>}
 
         {/* ALERTS — acordeón colapsable */}
         {viewMode==="month"&&(budAlerts.length>0||hormiga.length>0)&&(()=>{
@@ -2582,6 +2841,8 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             <div style={{fontSize:14,fontWeight:500}}>Gastos — {viewMode==="year"?selYear:`${MONTHS[selMonth]} ${selYear}`} <span style={{fontSize:12,color:C.red,marginLeft:8}}>{fmtH(totG,currency,tc)}</span></div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               <Btn small onClick={exportarCSV}>⬇ CSV</Btn>
+              <Btn small onClick={exportarXLSX}>⬇ XLSX</Btn>
+              <Btn small onClick={()=>setCsvModal(true)}>⬆ Importar CSV</Btn>
               <Btn small onClick={()=>setRecurrentesModal(true)}>↻ Recurrentes</Btn>
               <Btn primary onClick={()=>setShowForm(!showForm)}>+ Nuevo gasto</Btn>
             </div>
@@ -2697,11 +2958,45 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
                       <td style={{padding:"8px 12px",textAlign:"right",fontWeight:600,whiteSpace:"nowrap",color:cat.color}}>{hideAmounts?"••••":`-${fmtTx(g.monto,currency,tc,g.tc_at_time)}`}</td>
                       <td style={{padding:"8px 12px",textAlign:"right"}}>
                         {viewMode==="month"&&<div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-                          <button onClick={()=>openEditGasto(g)} title="Editar" style={{background:C.blue+"18",border:`1px solid ${C.blue}33`,borderRadius:6,cursor:"pointer",color:C.blue,fontSize:11,padding:"3px 8px"}}>✎</button>
+                          <button onClick={()=>{setInlineEditId(g.id);setInlineEditData({monto:String(g.monto),cat:g.cat,sub:g.sub,descripcion:g.descripcion||""});}} title="Edición rápida" style={{background:C.green+"18",border:`1px solid ${C.green}33`,borderRadius:6,cursor:"pointer",color:C.green,fontSize:11,padding:"3px 8px"}}>✎</button>
+                          <button onClick={()=>openEditGasto(g)} title="Editar completo" style={{background:C.blue+"18",border:`1px solid ${C.blue}33`,borderRadius:6,cursor:"pointer",color:C.blue,fontSize:11,padding:"3px 8px"}}>⊞</button>
                           <button onClick={()=>delGasto(g.id)} title="Eliminar" style={{background:"none",border:"none",cursor:"pointer",color:C.t3,fontSize:16}}>×</button>
                         </div>}
                       </td>
-                    </tr>;
+                    </tr>
+                    {/* EDICIÓN INLINE */}
+                    {inlineEditId===g.id&&<tr style={{background:C.bg3}}>
+                      <td colSpan={6} style={{padding:"10px 12px"}}>
+                        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                          <input type="text" inputMode="decimal" placeholder="Monto"
+                            style={{...inp,width:110,padding:"5px 8px",fontSize:12}}
+                            value={inlineEditData.monto}
+                            onChange={e=>setInlineEditData(d=>({...d,monto:e.target.value}))}
+                            autoFocus
+                          />
+                          <select style={{...sel,padding:"5px 8px",fontSize:12,width:130}}
+                            value={inlineEditData.cat}
+                            onChange={e=>{const c=cats.find(x=>x.id===e.target.value);setInlineEditData(d=>({...d,cat:e.target.value,sub:c?.items[0]?.id||""}));}}
+                          >
+                            {cats.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+                          </select>
+                          <select style={{...sel,padding:"5px 8px",fontSize:12,width:130}}
+                            value={inlineEditData.sub}
+                            onChange={e=>setInlineEditData(d=>({...d,sub:e.target.value}))}
+                          >
+                            {(cats.find(c=>c.id===inlineEditData.cat)?.items||[]).map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+                          </select>
+                          <input type="text" placeholder="Descripción"
+                            style={{...inp,flex:1,minWidth:100,padding:"5px 8px",fontSize:12}}
+                            value={inlineEditData.descripcion}
+                            onChange={e=>setInlineEditData(d=>({...d,descripcion:e.target.value}))}
+                          />
+                          <button onClick={()=>saveInlineEdit(g.id)} style={{background:C.green+"22",border:`1px solid ${C.green}44`,borderRadius:6,padding:"5px 12px",cursor:"pointer",color:C.green,fontSize:12,fontWeight:600}}>✓ Guardar</button>
+                          <button onClick={()=>{setInlineEditId(null);setInlineEditData({});}} style={{background:"none",border:`1px solid ${C.bd}`,borderRadius:6,padding:"5px 10px",cursor:"pointer",color:C.t3,fontSize:12}}>Cancelar</button>
+                        </div>
+                      </td>
+                    </tr>}
+                    
                   })}</tbody>
                   <tfoot><tr style={{background:C.bg3}}>
                     <td colSpan={4} style={{padding:"8px 12px",fontSize:12,color:C.t2,fontWeight:500}}>Subtotal</td>
@@ -5521,6 +5816,161 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           </div>
         </div>
       </Modal>}
+
+      {/* ─── MODAL IMPORTAR CSV BANCARIO ─── */}
+      {csvModal&&<Modal title="⬆ Importar extracto bancario (CSV)" onClose={()=>{setCsvModal(false);setCsvMapped([]);setCsvError("");}} wide>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{background:C.bg3,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.t2}}>
+            Soporta formatos de <b>BNA, BBVA, Galicia</b> y CSV genérico. Descargá el extracto desde el banco, subilo acá y se mapea automáticamente a tus categorías.
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:6}}>Seleccioná el archivo CSV</div>
+            <input type="file" accept=".csv,.txt" onChange={e=>e.target.files[0]&&parsearCSVBanco(e.target.files[0])}
+              style={{fontSize:12,color:C.t2,width:"100%"}}/>
+          </div>
+          {csvLoading&&<div style={{textAlign:"center",padding:"20px 0",color:C.t3,fontSize:13}}>Procesando archivo...</div>}
+          {csvError&&<div style={{background:C.red+"18",borderRadius:8,padding:"8px 12px",fontSize:12,color:C.red}}>{csvError}</div>}
+          {csvMapped.length>0&&<>
+            <div style={{fontSize:12,fontWeight:500,color:C.t}}>{csvMapped.length} movimientos detectados — marcá los que querés importar:</div>
+            <div style={{maxHeight:340,overflowY:"auto",border:`1px solid ${C.bd}`,borderRadius:8}}>
+              {/* Header */}
+              <div style={{display:"grid",gridTemplateColumns:"32px 1fr 90px 120px 100px",gap:8,padding:"7px 12px",borderBottom:`1px solid ${C.bd}`,fontSize:10,color:C.t3,textTransform:"uppercase",letterSpacing:"0.05em",position:"sticky",top:0,background:C.bg3}}>
+                <span>✓</span><span>Descripción</span><span>Monto</span><span>Categoría</span><span>Fecha</span>
+              </div>
+              {csvMapped.map((r,i)=>(
+                <div key={i} style={{display:"grid",gridTemplateColumns:"32px 1fr 90px 120px 100px",gap:8,padding:"7px 12px",borderBottom:`1px solid ${C.bd}`,alignItems:"center",background:r.seleccionado?C.green+"06":"transparent"}}>
+                  <input type="checkbox" checked={r.seleccionado} onChange={e=>setCsvMapped(m=>m.map((x,j)=>j===i?{...x,seleccionado:e.target.checked}:x))} style={{accentColor:C.green,width:14,height:14}}/>
+                  <span style={{fontSize:12,color:C.t2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.desc||"—"}</span>
+                  <span style={{fontSize:12,fontWeight:600,color:C.green}}>${r.monto.toLocaleString("es-AR")}</span>
+                  <select style={{...sel,padding:"3px 6px",fontSize:11}} value={r.cat} onChange={e=>{const c=cats.find(x=>x.id===e.target.value);setCsvMapped(m=>m.map((x,j)=>j===i?{...x,cat:e.target.value,sub:c?.items[0]?.id||""}:x));}}>
+                    {cats.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  <span style={{fontSize:11,color:C.t3}}>{r.fecha||"—"}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <span style={{fontSize:12,color:C.t3}}>{csvMapped.filter(r=>r.seleccionado).length} de {csvMapped.length} seleccionados</span>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setCsvMapped(m=>m.map(x=>({...x,seleccionado:true})))} style={{background:C.bg3,border:`1px solid ${C.bd}`,borderRadius:6,padding:"5px 10px",cursor:"pointer",color:C.t2,fontSize:11}}>Seleccionar todos</button>
+                <Btn primary onClick={guardarCSVImportados} disabled={csvSaving||!csvMapped.some(r=>r.seleccionado)}>{csvSaving?"Guardando...":"Importar seleccionados"}</Btn>
+              </div>
+            </div>
+          </>}
+        </div>
+      </Modal>}
+
+      {/* ─── MODAL HISTORIAL DE CAMBIOS ─── */}
+      {changeLogModal&&<Modal title="📋 Historial de cambios" onClose={()=>setChangeLogModal(false)}>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {changeLog.length===0&&<div style={{fontSize:12,color:C.t3,textAlign:"center",padding:"20px 0"}}>Sin cambios registrados todavía.</div>}
+          <div style={{maxHeight:400,overflowY:"auto"}}>
+            {changeLog.map((e,i)=>(
+              <div key={i} style={{display:"flex",gap:12,alignItems:"flex-start",padding:"9px 0",borderBottom:`1px solid ${C.bd}`}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:C.blue,marginTop:5,flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,fontWeight:500,color:C.t}}>{e.action}</div>
+                  <div style={{fontSize:11,color:C.t2,marginTop:1}}>{e.detail}</div>
+                </div>
+                <div style={{fontSize:10,color:C.t3,whiteSpace:"nowrap"}}>{new Date(e.ts).toLocaleString("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</div>
+              </div>
+            ))}
+          </div>
+          {changeLog.length>0&&<div style={{textAlign:"right"}}><button onClick={()=>{setChangeLog([]);try{localStorage.removeItem("fa_changelog");}catch{}}} style={{background:C.red+"18",border:`1px solid ${C.red}33`,borderRadius:6,padding:"4px 10px",cursor:"pointer",color:C.red,fontSize:11}}>Limpiar historial</button></div>}
+        </div>
+      </Modal>}
+
+      {/* ─── MODAL COMPARTIR MES ─── */}
+      {shareModal&&<Modal title="↗ Compartir resumen del mes" onClose={()=>setShareModal(false)}>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{background:C.bg3,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.t2}}>
+            Compartí un resumen de <b style={{color:C.t}}>{MONTHS[selMonth]} {selYear}</b> en modo lectura. El link incluye ingresos, gastos y distribución por categoría, sin datos privados adicionales.
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.t2,marginBottom:6}}>Link de solo lectura</div>
+            <div style={{display:"flex",gap:8}}>
+              <input readOnly style={{...inp,fontSize:11,flex:1}} value={shareUrl}/>
+              <button onClick={()=>{navigator.clipboard?.writeText(shareUrl);toast("✓ Link copiado","success");}} style={{background:C.blue+"22",border:`1px solid ${C.blue}44`,borderRadius:7,padding:"8px 14px",cursor:"pointer",color:C.blue,fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>Copiar</button>
+            </div>
+          </div>
+          <div style={{background:C.amber+"0D",border:`1px solid ${C.amber}22`,borderRadius:8,padding:"8px 12px",fontSize:11,color:C.t3}}>
+            ℹ El link contiene el resumen codificado — quien lo reciba puede ver los números pero no accede a tu cuenta ni a otros meses.
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            {navigator.share&&<Btn primary onClick={()=>navigator.share({title:`Finanzas ${MONTHS[selMonth]} ${selYear}`,url:shareUrl})}>Compartir nativo</Btn>}
+            <Btn onClick={()=>setShareModal(false)}>Cerrar</Btn>
+          </div>
+        </div>
+      </Modal>}
+
+      {/* ─── ONBOARDING WIZARD ─── */}
+      {showOnboarding&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:20}}>
+        <div style={{background:C.bg2,border:`1px solid ${C.bd2}`,borderRadius:18,padding:32,maxWidth:480,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+          {/* Progress dots */}
+          <div style={{display:"flex",gap:6,justifyContent:"center",marginBottom:24}}>
+            {[0,1,2].map(i=><span key={i} style={{width:i===onboardingStep?24:8,height:8,borderRadius:4,background:i===onboardingStep?C.blue:C.bg4,transition:"width .3s"}}/>)}
+          </div>
+          {onboardingStep===0&&<>
+            <div style={{textAlign:"center",marginBottom:20}}>
+              <div style={{fontSize:32,marginBottom:8}}>👋</div>
+              <div style={{fontSize:18,fontWeight:700,color:C.t,marginBottom:8}}>Bienvenido a FinanzasApp</div>
+              <div style={{fontSize:13,color:C.t2,lineHeight:1.6}}>Tu app de finanzas personales para Argentina. Te guiamos en 3 pasos rápidos para configurarla.</div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
+              {[{icon:"📂",txt:"Categorías de gasto ya configuradas"},
+                {icon:"💰",txt:"Soporte ARS y USD con TC oficial/blue"},
+                {icon:"📊",txt:"Presupuestos, alertas y análisis con IA"}].map((x,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:C.bg3,borderRadius:8,padding:"8px 12px"}}>
+                  <span style={{fontSize:16}}>{x.icon}</span>
+                  <span style={{fontSize:12,color:C.t2}}>{x.txt}</span>
+                </div>
+              ))}
+            </div>
+          </>}
+          {onboardingStep===1&&<>
+            <div style={{textAlign:"center",marginBottom:20}}>
+              <div style={{fontSize:32,marginBottom:8}}>💵</div>
+              <div style={{fontSize:18,fontWeight:700,color:C.t,marginBottom:8}}>Tipo de cambio</div>
+              <div style={{fontSize:13,color:C.t2,lineHeight:1.6}}>Configurá qué TC usar. Se obtiene automáticamente desde dolarapi.com o podés ingresarlo manual.</div>
+            </div>
+            <div style={{background:C.bg3,borderRadius:10,padding:"14px 16px",marginBottom:20}}>
+              <div style={{fontSize:12,color:C.t2,marginBottom:8}}>TC actual configurado:</div>
+              <div style={{fontSize:24,fontWeight:700,color:C.green}}>${tc.toLocaleString("es-AR")}</div>
+              <div style={{fontSize:11,color:C.t3,marginTop:4}}>Podés cambiarlo en cualquier momento desde la barra superior.</div>
+            </div>
+          </>}
+          {onboardingStep===2&&<>
+            <div style={{textAlign:"center",marginBottom:20}}>
+              <div style={{fontSize:32,marginBottom:8}}>🚀</div>
+              <div style={{fontSize:18,fontWeight:700,color:C.t,marginBottom:8}}>¡Listo para empezar!</div>
+              <div style={{fontSize:13,color:C.t2,lineHeight:1.6}}>Algunos atajos para arrancar rápido:</div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+              {[
+                {key:"N",desc:"Nuevo gasto rápido"},
+                {key:"I",desc:"Nuevo ingreso"},
+                {key:"← →",desc:"Cambiar de mes"},
+                {key:"ESC",desc:"Cerrar modales"},
+              ].map((x,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:C.bg3,borderRadius:8,padding:"8px 12px"}}>
+                  <span style={{background:C.bg4,borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:700,color:C.blue,fontFamily:"monospace",whiteSpace:"nowrap"}}>{x.key}</span>
+                  <span style={{fontSize:12,color:C.t2}}>{x.desc}</span>
+                </div>
+              ))}
+            </div>
+          </>}
+          <div style={{display:"flex",gap:8,justifyContent:"space-between"}}>
+            <button onClick={completeOnboarding} style={{background:"none",border:"none",cursor:"pointer",color:C.t3,fontSize:12}}>Saltar</button>
+            <div style={{display:"flex",gap:8}}>
+              {onboardingStep>0&&<Btn onClick={()=>setOnboardingStep(s=>s-1)}>← Atrás</Btn>}
+              {onboardingStep<2
+                ?<Btn primary onClick={()=>setOnboardingStep(s=>s+1)}>Siguiente →</Btn>
+                :<Btn primary onClick={completeOnboarding}>¡Empezar! 🚀</Btn>}
+            </div>
+          </div>
+        </div>
+      </div>}
+
     </div>
   );
 }
