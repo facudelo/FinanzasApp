@@ -488,6 +488,36 @@ function QuickAddModal({quickType,setQuickType,cats,MEDIOS_PAGO,tiposTodos,today
   );
 }
 
+function DupAlert({gastosDuplicados,fmtH,currency,tc,cats,delGasto,C}){
+  const [open,setOpen]=useState(false);
+  if(!gastosDuplicados.length)return null;
+  return<div style={{background:C.amber+"10",border:`1px solid ${C.amber}33`,borderRadius:10,marginBottom:12,overflow:"hidden"}}>
+    <button onClick={()=>setOpen(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"10px 14px",display:"flex",alignItems:"center",gap:10,justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <Ic id="activity" size={13} color={C.amber}/>
+        <span style={{fontSize:12,fontWeight:600,color:C.amber}}>⚠ {gastosDuplicados.length} posible{gastosDuplicados.length!==1?"s":""} duplicado{gastosDuplicados.length!==1?"s":""}</span>
+        <span style={{fontSize:11,color:C.t3}}>— mismo monto, categoría y fecha</span>
+      </div>
+      <span style={{color:C.t3,fontSize:13}}>{open?"▴":"▾"}</span>
+    </button>
+    {open&&<div style={{padding:"0 14px 12px",display:"flex",flexDirection:"column",gap:6}}>
+      {gastosDuplicados.map(d=>(
+        <div key={d.key} style={{background:C.bg3,borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:10,fontSize:12}}>
+          <div style={{width:22,height:22,borderRadius:6,background:(d.cat?.color||C.amber)+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            <Ic id={d.cat?.icon||"flag"} size={11} color={d.cat?.color||C.amber}/>
+          </div>
+          <div style={{flex:1}}>
+            <span style={{color:C.t}}>{d.cat?.label}</span>
+            <span style={{color:C.t3}}> · {fmtH(d.monto,currency,tc)} · {d.a.fecha}</span>
+            {d.a.descripcion&&<span style={{color:C.t3}}> · {d.a.descripcion}</span>}
+          </div>
+          <button onClick={()=>delGasto(d.b.id)} style={{background:C.red+"18",border:`1px solid ${C.red}33`,borderRadius:5,padding:"2px 8px",cursor:"pointer",color:C.red,fontSize:11}}>Eliminar uno</button>
+        </div>
+      ))}
+    </div>}
+  </div>;
+}
+
 function AlertsAccordion({ totalAlertas, onDismissAll, children }) {
   const [open, setOpen] = useState(false);
   return(
@@ -954,6 +984,115 @@ function Dashboard({ session }) {
     });
     return alerts;
   },[byCat,bySub,budgets,cats]);
+
+  // ─── #3 PROYECCIÓN CIERRE DE MES ─────────────────────────────────────────
+  // Dado el ritmo de gasto actual del mes, proyecta el total al fin de mes
+  const proyeccionCierre=useMemo(()=>{
+    if(viewMode!=="month")return null;
+    const hoy=new Date();
+    const esElMesActual=hoy.getFullYear()===selYear&&hoy.getMonth()===selMonth;
+    if(!esElMesActual)return null; // Solo proyectar el mes en curso
+    const diaActual=hoy.getDate();
+    const diasEnMes=new Date(selYear,selMonth+1,0).getDate();
+    if(diaActual===0||diasEnMes===0)return null;
+    const ritmo=totG/diaActual; // ARS/día promedio hasta hoy
+    const proyTotal=Math.round(ritmo*diasEnMes);
+    const proyResto=Math.round(ritmo*(diasEnMes-diaActual));
+    const pctMes=Math.round((diaActual/diasEnMes)*100);
+    // Por categoría
+    const porCat=cats.map(c=>{
+      const gastadoHoy=byCat[c.id]||0;
+      if(!gastadoHoy)return null;
+      const proy=Math.round((gastadoHoy/diaActual)*diasEnMes);
+      const bud=budgets[c.id]||null;
+      return{catId:c.id,label:c.label,color:c.color,icon:c.icon,gastadoHoy,proy,bud,superaBudget:bud&&proy>bud};
+    }).filter(Boolean);
+    return{diaActual,diasEnMes,pctMes,ritmo,proyTotal,proyResto,porCat};
+  },[viewMode,selYear,selMonth,totG,byCat,cats,budgets]);
+
+  // ─── #4 DETECCIÓN DE GASTOS DUPLICADOS ───────────────────────────────────
+  const gastosDuplicados=useMemo(()=>{
+    if(!monthGastos.length)return[];
+    const candidatos=[];
+    for(let i=0;i<monthGastos.length;i++){
+      for(let j=i+1;j<monthGastos.length;j++){
+        const a=monthGastos[i],b=monthGastos[j];
+        if(a.cat===b.cat&&a.sub===b.sub&&Number(a.monto)===Number(b.monto)){
+          // Verificar que las fechas sean iguales o dentro de 1 día
+          const fa=a.fecha?a.fecha.split("/").reverse().join("-"):"";
+          const fb=b.fecha?b.fecha.split("/").reverse().join("-"):"";
+          const diffDias=fa&&fb?Math.abs(new Date(fa)-new Date(fb))/(1000*60*60*24):0;
+          if(diffDias<=1){
+            const key=`${a.id}-${b.id}`;
+            if(!candidatos.some(x=>x.key===key)){
+              candidatos.push({key,a,b,monto:Number(a.monto),cat:cats.find(c=>c.id===a.cat),diffDias});
+            }
+          }
+        }
+      }
+    }
+    return candidatos;
+  },[monthGastos,cats]);
+
+  // ─── #2 PRESUPUESTO SUGERIDO — promedio últimos 3 meses ──────────────────
+  const presupuestoSugerido=useMemo(()=>{
+    const sugeridos={};
+    cats.forEach(c=>{
+      const totales=[];
+      for(let i=1;i<=3;i++){
+        const m=selMonth-i<0?selMonth-i+12:selMonth-i;
+        const y=selMonth-i<0?selYear-1:selYear;
+        const t=gastos.filter(g=>g.year===y&&g.month===m&&g.cat===c.id).reduce((s,g)=>s+Number(g.monto),0);
+        if(t>0)totales.push(t);
+      }
+      if(totales.length>0){
+        sugeridos[c.id]=Math.round(totales.reduce((s,x)=>s+x,0)/totales.length);
+      }
+      c.items.forEach(s=>{
+        const key=`${c.id}|${s.id}`;
+        const totSub=[];
+        for(let i=1;i<=3;i++){
+          const m=selMonth-i<0?selMonth-i+12:selMonth-i;
+          const y=selMonth-i<0?selYear-1:selYear;
+          const t=gastos.filter(g=>g.year===y&&g.month===m&&g.cat===c.id&&g.sub===s.id).reduce((ss,g)=>ss+Number(g.monto),0);
+          if(t>0)totSub.push(t);
+        }
+        if(totSub.length>0){
+          sugeridos[key]=Math.round(totSub.reduce((ss,x)=>ss+x,0)/totSub.length);
+        }
+      });
+    });
+    return sugeridos;
+  },[cats,gastos,selMonth,selYear]);
+
+  // ─── #7 AJUSTE POR INFLACIÓN ──────────────────────────────────────────────
+  // Comparativa intermensual ajustada por IPC: cuánto subió mi gasto vs inflación
+  const comparativaInflacion=useMemo(()=>{
+    if(!inflData||viewMode!=="month")return null;
+    const ipcMap={};
+    inflData.forEach(x=>{ipcMap[x.fecha.slice(0,7)]=x.valor;});
+    const prevM=selMonth===0?11:selMonth-1;
+    const prevY=selMonth===0?selYear-1:selYear;
+    const clavePrev=`${prevY}-${String(prevM+1).padStart(2,"0")}`;
+    const ipcMes=ipcMap[clavePrev];
+    if(ipcMes==null)return null;
+    const gastoPrev=gastos.filter(g=>g.year===prevY&&g.month===prevM).reduce((s,g)=>s+Number(g.monto),0);
+    if(!gastoPrev||!totG)return null;
+    const varGasto=((totG-gastoPrev)/gastoPrev)*100;
+    const gastoPrevAjustado=gastoPrev*(1+ipcMes/100);
+    const superaInflacion=totG>gastoPrevAjustado;
+    return{
+      ipcMes,
+      gastoPrev,
+      gastoCurrent:totG,
+      varGasto:varGasto.toFixed(1),
+      gastoPrevAjustado:Math.round(gastoPrevAjustado),
+      superaInflacion,
+      diferencia:totG-gastoPrevAjustado,
+      mesPrev:MONTHS[prevM],
+      mesCurrent:MONTHS[selMonth],
+    };
+  },[inflData,viewMode,selMonth,selYear,gastos,totG]);
 
   const hormiga=useMemo(()=>{
     const counts={};
@@ -2528,6 +2667,9 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           </div>
         )}
 
+        {/* ALERTAS DUPLICADOS */}
+        {viewMode==="month"&&<DupAlert gastosDuplicados={gastosDuplicados} fmtH={fmtH} currency={currency} tc={tc} cats={cats} delGasto={delGasto} C={C}/>}
+
         {/* BÚSQUEDA RÁPIDA DASHBOARD */}
         {tab==="dashboard"&&<div style={{marginBottom:12}}>
           <div style={{position:"relative"}}>
@@ -2617,6 +2759,61 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:16,fontWeight:700,color:C.green}}>+{fmtH(saldoRollover,currency,tc)}</div>
               <div style={{fontSize:11,color:C.t3}}>Disponible total este mes: <b style={{color:dispGastarConRollover>=0?C.green:C.red}}>{fmtH(dispGastarConRollover,currency,tc)}</b></div>
+            </div>
+          </div>}
+
+          {/* ── #3 PROYECCIÓN CIERRE DE MES ───────────────────────────── */}
+          {proyeccionCierre&&totG>0&&<div style={{background:`linear-gradient(135deg,${C.bg2},${C.bg3})`,border:`1px solid ${C.blue}33`,borderRadius:12,padding:"14px 18px",marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:600,color:C.t3,textTransform:"uppercase",letterSpacing:"0.06em"}}>📈 Proyección cierre de mes</div>
+                <div style={{fontSize:11,color:C.t3,marginTop:2}}>Día {proyeccionCierre.diaActual} de {proyeccionCierre.diasEnMes} · ritmo: {fmtH(Math.round(proyeccionCierre.ritmo),"ARS",tc)}/día</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:18,fontWeight:700,color:C.blue}}>{fmtH(proyeccionCierre.proyTotal,"ARS",tc)}</div>
+                <div style={{fontSize:11,color:C.t3}}>al 31/{MONTHS[selMonth]}</div>
+              </div>
+            </div>
+            {/* Barra de progreso del mes */}
+            <div style={{height:6,borderRadius:4,background:C.bg4,overflow:"hidden",marginBottom:10}}>
+              <div style={{height:"100%",borderRadius:4,background:`linear-gradient(90deg,${C.blue}88,${C.blue})`,width:`${proyeccionCierre.pctMes}%`,transition:"width .5s"}}/>
+            </div>
+            {/* Categorías con proyección vs presupuesto */}
+            {proyeccionCierre.porCat.filter(c=>c.superaBudget||c.proy>0).slice(0,5).map(c=>(
+              <div key={c.catId} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                <span style={{width:18,height:18,borderRadius:5,background:c.color+"22",display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  <Ic id={c.icon} size={9} color={c.color}/>
+                </span>
+                <span style={{fontSize:11,color:C.t2,flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.label}</span>
+                <span style={{fontSize:11,fontWeight:500,color:c.superaBudget?C.red:C.t}}>{fmtH(c.proy,"ARS",tc)}</span>
+                {c.bud&&<span style={{fontSize:10,color:c.superaBudget?C.red:C.t3}}>/ {fmtH(c.bud,"ARS",tc)} {c.superaBudget?"⚠":""}</span>}
+              </div>
+            ))}
+          </div>}
+
+          {/* ── #7 COMPARATIVA VS INFLACIÓN ────────────────────────────── */}
+          {comparativaInflacion&&<div style={{background:comparativaInflacion.superaInflacion?C.red+"0D":C.green+"0D",border:`1px solid ${comparativaInflacion.superaInflacion?C.red:C.green}33`,borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:32,height:32,borderRadius:8,background:(comparativaInflacion.superaInflacion?C.red:C.green)+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <Ic id="trend" size={14} color={comparativaInflacion.superaInflacion?C.red:C.green}/>
+              </div>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:C.t}}>
+                  {comparativaInflacion.superaInflacion?"⚠ Tus gastos superan la inflación":"✓ Tus gastos están por debajo de la inflación"}
+                </div>
+                <div style={{fontSize:11,color:C.t3,marginTop:2}}>
+                  vs {comparativaInflacion.mesPrev}: variaste <b style={{color:Number(comparativaInflacion.varGasto)>=0?C.red:C.green}}>{Number(comparativaInflacion.varGasto)>=0?"+":""}{comparativaInflacion.varGasto}%</b>
+                  · IPC {comparativaInflacion.mesPrev}: <b style={{color:C.amber}}>{comparativaInflacion.ipcMes}%</b>
+                </div>
+              </div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:13,fontWeight:700,color:comparativaInflacion.superaInflacion?C.red:C.green}}>
+                {comparativaInflacion.superaInflacion?"+":"-"}{fmtH(Math.abs(comparativaInflacion.diferencia),"ARS",tc)}
+              </div>
+              <div style={{fontSize:10,color:C.t3}}>
+                {comparativaInflacion.superaInflacion?"sobre":"bajo"} el nivel ajustado por IPC
+              </div>
             </div>
           </div>}
           {/* BARRA RESUMEN REAL */}
@@ -5315,7 +5512,10 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
       {catModal==="edit-sub"&&<Modal title="Editar subcategoría" onClose={()=>setCatModal(null)}><div style={{display:"flex",flexDirection:"column",gap:16}}><div><div style={{fontSize:11,color:C.t2,marginBottom:6}}>Nombre</div><input style={inp} value={subDraft.label} onChange={e=>setSubDraft(d=>({...d,label:e.target.value}))}/></div><IconPicker value={subDraft.icon} onChange={ic=>setSubDraft(d=>({...d,icon:ic}))}/><div style={{display:"flex",gap:8}}><Btn primary onClick={saveEditSub}>Guardar</Btn><Btn onClick={()=>setCatModal(null)}>Cancelar</Btn></div></div></Modal>}
 
       {budgetModal&&<Modal title={`Presupuesto — ${MONTHS[selMonth]} ${selYear}`} onClose={()=>setBudgetModal(false)} wide>
-        <div style={{fontSize:12,color:C.t2,marginBottom:16}}>Podés poner límite a nivel <b style={{color:C.t}}>categoría</b> y/o a nivel <b style={{color:C.t}}>subcategoría</b>. Dejá vacío para sin límite. El total de categoría se calcula automáticamente de las subcategorías si las completás.</div>
+        <div style={{fontSize:12,color:C.t2,marginBottom:8}}>Podés poner límite a nivel <b style={{color:C.t}}>categoría</b> y/o a nivel <b style={{color:C.t}}>subcategoría</b>. Dejá vacío para sin límite.</div>
+        <div style={{background:C.blue+"0D",border:`1px solid ${C.blue}22`,borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:11,color:C.t3}}>
+          💡 Los valores sugeridos en gris son el promedio de tus últimos 3 meses.
+        </div>
         {cats.map(cat=>{
           // Auto-sum: sumar subcategorías con valor en el draft
           const subSum=cat.items.reduce((s,sub)=>{
@@ -5324,39 +5524,57 @@ CHART_JSON:{"type":"bar","title":"Título del gráfico","data":[{"label":"Nombre
           },0);
           const catVal=budgetDraft[cat.id];
           const showAutoSum=subSum>0&&!catVal;
+          const sugerCat=presupuestoSugerido[cat.id];
           return<div key={cat.id} style={{marginBottom:16,background:C.bg3,border:`1px solid ${C.bd}`,borderRadius:10,overflow:"hidden"}}>
           {/* Cat row */}
           <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderBottom:`1px solid ${C.bd}`,background:cat.color+"0A"}}>
             <div style={{width:28,height:28,borderRadius:7,background:cat.color+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic id={cat.icon} size={14} color={cat.color}/></div>
-            <div style={{flex:1,fontSize:13,fontWeight:500,color:cat.color}}>{cat.label}</div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:500,color:cat.color}}>{cat.label}</div>
+              {sugerCat&&!catVal&&<div style={{fontSize:10,color:C.t3,marginTop:1}}>Promedio 3m: <b style={{color:C.t2}}>{fmtH(sugerCat,currency,tc)}</b> <button onClick={()=>setBudgetDraft(d=>({...d,[cat.id]:sugerCat}))} style={{background:cat.color+"15",border:`1px solid ${cat.color}33`,borderRadius:4,padding:"0px 5px",cursor:"pointer",color:cat.color,fontSize:10}}>usar</button></div>}
+            </div>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
               {showAutoSum&&<button
                 onClick={()=>setBudgetDraft(d=>({...d,[cat.id]:subSum}))}
                 style={{fontSize:11,color:cat.color,background:cat.color+"15",border:`1px solid ${cat.color}44`,borderRadius:6,padding:"3px 8px",cursor:"pointer",whiteSpace:"nowrap"}}
-              >= {fmtH(subSum,currency,tc)} ↑ usar suma</button>}
+              >= {fmtH(subSum,currency,tc)} ↑ suma</button>}
               <span style={{fontSize:11,color:C.t3,whiteSpace:"nowrap"}}>Total cat:</span>
-              <input type="number" placeholder={showAutoSum?String(subSum):"Sin límite"} style={{...inp,width:130,padding:"5px 8px",fontSize:12,borderColor:showAutoSum?cat.color+"66":undefined}} value={budgetDraft[cat.id]||""} onChange={e=>setBudgetDraft(d=>({...d,[cat.id]:e.target.value?+e.target.value:undefined}))}/>
+              <input type="number" placeholder={sugerCat&&!catVal?String(sugerCat):showAutoSum?String(subSum):"Sin límite"} style={{...inp,width:130,padding:"5px 8px",fontSize:12,borderColor:showAutoSum?cat.color+"66":undefined,color:(sugerCat&&!catVal)?C.t3:undefined}} value={budgetDraft[cat.id]||""} onChange={e=>setBudgetDraft(d=>({...d,[cat.id]:e.target.value?+e.target.value:undefined}))}/>
             </div>
           </div>
           {/* Sub rows */}
-          {cat.items.map(sub=><div key={sub.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px 8px 28px",borderBottom:`1px solid ${C.bd}`}}>
-            <div style={{width:22,height:22,borderRadius:5,background:cat.color+"15",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic id={sub.icon} size={11} color={cat.color}/></div>
-            <div style={{flex:1,fontSize:12,color:C.t2}}>{sub.label}</div>
-            <input type="number" placeholder="Sin límite" style={{...inp,width:130,padding:"5px 8px",fontSize:12}} value={budgetDraft[`${cat.id}|${sub.id}`]||""} onChange={e=>{
-              const val=e.target.value?+e.target.value:undefined;
-              setBudgetDraft(d=>{
-                const next={...d,[`${cat.id}|${sub.id}`]:val};
-                // Recalcular suma y si el campo de cat está vacío, auto-completar
-                const newSum=cat.items.reduce((s,s2)=>{
-                  const v=next[`${cat.id}|${s2.id}`];
-                  return s+(v?+v:0);
-                },0);
-                if(newSum>0&&!next[cat.id]) next[cat.id]=newSum;
-                else if(newSum>0&&next[cat.id]) next[cat.id]=newSum;
-                return next;
-              });
-            }}/>
-          </div>)}
+          {cat.items.map(sub=>{
+            const subKey=`${cat.id}|${sub.id}`;
+            const sugerSub=presupuestoSugerido[subKey];
+            return<div key={sub.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px 8px 28px",borderBottom:`1px solid ${C.bd}`}}>
+              <div style={{width:22,height:22,borderRadius:5,background:cat.color+"15",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic id={sub.icon} size={11} color={cat.color}/></div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,color:C.t2}}>{sub.label}</div>
+                {sugerSub&&!budgetDraft[subKey]&&<div style={{fontSize:10,color:C.t3}}>Prom 3m: <b style={{color:C.t2}}>{fmtH(sugerSub,currency,tc)}</b> <button onClick={()=>{
+                  const val=sugerSub;
+                  setBudgetDraft(d=>{
+                    const next={...d,[subKey]:val};
+                    const newSum=cat.items.reduce((s,s2)=>{const v=next[`${cat.id}|${s2.id}`];return s+(v?+v:0);},0);
+                    if(newSum>0) next[cat.id]=newSum;
+                    return next;
+                  });
+                }} style={{background:cat.color+"15",border:`1px solid ${cat.color}33`,borderRadius:4,padding:"0px 5px",cursor:"pointer",color:cat.color,fontSize:10}}>usar</button></div>}
+              </div>
+              <input type="number" placeholder={sugerSub&&!budgetDraft[subKey]?String(sugerSub):"Sin límite"} style={{...inp,width:130,padding:"5px 8px",fontSize:12,color:sugerSub&&!budgetDraft[subKey]?C.t3:undefined}} value={budgetDraft[subKey]||""} onChange={e=>{
+                const val=e.target.value?+e.target.value:undefined;
+                setBudgetDraft(d=>{
+                  const next={...d,[subKey]:val};
+                  const newSum=cat.items.reduce((s,s2)=>{
+                    const v=next[`${cat.id}|${s2.id}`];
+                    return s+(v?+v:0);
+                  },0);
+                  if(newSum>0&&!next[cat.id]) next[cat.id]=newSum;
+                  else if(newSum>0&&next[cat.id]) next[cat.id]=newSum;
+                  return next;
+                });
+              }}/>
+            </div>;
+          })}
         </div>;})}
         <div style={{display:"flex",gap:8,marginTop:8}}><Btn primary onClick={saveBudgets}>Guardar</Btn><Btn onClick={()=>setBudgetModal(false)}>Cancelar</Btn></div>
       </Modal>}
