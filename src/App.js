@@ -918,15 +918,25 @@ function Dashboard({ session }) {
       const [d,h]=desde<=hasta?[desde,hasta]:[hasta,desde];
       inv=inversiones.filter(i=>{const t=i.anio*12+i.mes;return t>=d&&t<=h;});
     } else inv=monthInversiones;
-    return inv.reduce((s,i)=>{
+    // FIX: Math.max(0,...) garantiza que retiros netos nunca inflen el Disponible Real
+    return Math.max(0, inv.reduce((s,i)=>{
       const m=Number(i.monto);
       const esRetiro=(i.descripcion||"").startsWith("[RETIRO]");
       const montoARS=i.moneda==="USD"?m*(i.tc_at_time||tc):m;
       return s+(esRetiro?-montoARS:montoARS);
-    },0);
+    },0));
   })();
 
-  const byPlataforma=useMemo(()=>platTodasPlat.reduce((acc,p)=>{acc[p.id]=inversiones.filter(i=>i.plataforma===p.id).reduce((s,i)=>{const m=Number(i.monto);return s+(i.moneda==="USD"?m*(i.tc_at_time||tc):m);},0);return acc;},{}),[inversiones,platTodasPlat,tc]);
+  // FIX: byPlataforma descuenta retiros — totalInvertidoHistorico refleja capital neto real
+  const byPlataforma=useMemo(()=>platTodasPlat.reduce((acc,p)=>{
+    acc[p.id]=Math.max(0, inversiones.filter(i=>i.plataforma===p.id).reduce((s,i)=>{
+      const m=Number(i.monto);
+      const esRet=(i.descripcion||"").startsWith("[RETIRO]");
+      const ars=i.moneda==="USD"?m*(i.tc_at_time||tc):m;
+      return s+(esRet?-ars:ars);
+    },0));
+    return acc;
+  },{}),[inversiones,platTodasPlat,tc]);
   const totalInvertidoHistorico=Object.values(byPlataforma).reduce((s,v)=>s+v,0);
 
   // ── Saldos/fondos reactivos ───────────────────────────────────────────────
@@ -963,8 +973,14 @@ function Dashboard({ session }) {
       .reduce((s,g)=>s+Number(g.monto),0);
     const ingresosAnt=ingresos.filter(i=>i.year===prevYear&&i.month===prevMonth)
       .reduce((s,i)=>s+Number(i.monto),0);
-    const invAnt=inversiones.filter(i=>i.anio===prevYear&&i.mes===prevMonth)
-      .reduce((s,i)=>{const m=Number(i.monto);return s+(i.moneda==="USD"?m*(i.tc_at_time||tc):m);},0);
+    // FIX: invAnt descuenta retiros igual que totInvARS — evita rollover inflado
+    const invAnt=Math.max(0, inversiones.filter(i=>i.anio===prevYear&&i.mes===prevMonth)
+      .reduce((s,i)=>{
+        const m=Number(i.monto);
+        const esRet=(i.descripcion||"").startsWith("[RETIRO]");
+        const ars=i.moneda==="USD"?m*(i.tc_at_time||tc):m;
+        return s+(esRet?-ars:ars);
+      },0));
     const disponibleAnt=ingresosAnt-gastosAnt-invAnt;
     return disponibleAnt>0?disponibleAnt:0;
   },[gastos,ingresos,inversiones,selMonth,selYear,viewMode,tc]);
@@ -973,8 +989,14 @@ function Dashboard({ session }) {
   const dispGastarConRollover=viewMode==="month"?dispGastar+saldoRollover:dispGastar;
 
   // mTotals con inversiones por mes para gráfico anual
+  // FIX: mInvTotals descuenta retiros — gráfico anual muestra neto real por mes
   const mInvTotals=useMemo(()=>MONTHS.map((_,m)=>({
-    inv:inversiones.filter(x=>x.anio===selYear&&x.mes===m).reduce((s,x)=>{const mn=Number(x.monto);return s+(x.moneda==="USD"?mn*(x.tc_at_time||tc):mn);},0),
+    inv:Math.max(0, inversiones.filter(x=>x.anio===selYear&&x.mes===m).reduce((s,x)=>{
+      const mn=Number(x.monto);
+      const esRet=(x.descripcion||"").startsWith("[RETIRO]");
+      const ars=x.moneda==="USD"?mn*(x.tc_at_time||tc):mn;
+      return s+(esRet?-ars:ars);
+    },0)),
   })),[inversiones,selYear,tc]);
 
   const byCat=useMemo(()=>{const r={};cats.forEach(c=>{r[c.id]=ad.filter(x=>x.cat===c.id).reduce((s,x)=>s+Number(x.monto),0);});return r;},[ad,cats]);
